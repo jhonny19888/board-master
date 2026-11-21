@@ -163,7 +163,7 @@ export default function App() {
     }
   });
 
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'logs' | 'playbook'
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [modeFilter, setModeFilter] = useState('all');
   const [tierFilter, setTierFilter] = useState('all');
   const [showAddModal, setShowAddModal] = useState(false);
@@ -326,7 +326,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0B0D12] text-slate-100 pb-24">
-      {/* 顶部栏 */}
       <header className="sticky top-0 z-30 backdrop-blur-md bg-[#0B0D12]/90 border-b border-slate-800/80 px-4 pt-3 pb-3">
         <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
@@ -356,7 +355,6 @@ export default function App() {
       </header>
 
       <main className="max-w-3xl mx-auto px-4 pt-4 space-y-5">
-        {/* 核心 KPI 卡片 */}
         <section className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="rounded-2xl bg-[#131722] border border-slate-800/90 p-3.5">
             <div className="flex items-center justify-between text-xs text-slate-400 mb-1">
@@ -411,10 +409,8 @@ export default function App() {
           </div>
         </section>
 
-        {/* 总览统计视图 */}
         {activeTab === 'dashboard' && (
           <div className="space-y-5">
-            {/* 四大模式对比 */}
             <section className="rounded-2xl bg-[#131722] border border-slate-800/90 p-4 space-y-3.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -467,7 +463,6 @@ export default function App() {
               </div>
             </section>
 
-            {/* 连板高度（首板 ~ 6进7板+）分析 */}
             <section className="rounded-2xl bg-[#131722] border border-slate-800/90 p-4 space-y-3.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -515,7 +510,6 @@ export default function App() {
               </div>
             </section>
 
-            {/* 最近复盘快捷预览 */}
             <section className="rounded-2xl bg-[#131722] border border-slate-800/90 p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -580,7 +574,6 @@ export default function App() {
           </div>
         )}
 
-        {/* 复盘流水与图表日志 */}
         {activeTab === 'logs' && (
           <div className="space-y-4">
             <div className="rounded-2xl bg-[#131722] border border-slate-800/90 p-3.5 space-y-3">
@@ -745,7 +738,6 @@ export default function App() {
           </div>
         )}
 
-        {/* 打板策略手册 */}
         {activeTab === 'playbook' && (
           <div className="space-y-4">
             <section className="rounded-2xl bg-[#131722] border border-slate-800/90 p-4 space-y-3">
@@ -782,4 +774,265 @@ export default function App() {
                     className="rounded-xl bg-[#0D1017] border border-slate-800/80 p-3.5 space-y-2"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-2">
-                      <span className="text-sm font-bold text-
+                      <span className="text-sm font-bold text-white">{block.tier}</span>
+                      <span className="text-xs text-amber-300">{block.focus}</span>
+                    </div>
+                    <ul className="space-y-1.5 text-xs text-slate-300 list-disc pl-4">
+                      {block.rules.map((rule, idx) => (
+                        <li key={idx} className="leading-relaxed">
+                          {rule}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            </section>
+          </div>
+        )}
+      </main>
+
+      <nav className="fixed bottom-0 inset-x-0 z-30 bg-[#0D1017]/95 backdrop-blur-md border-t border-slate-800/90">
+        <div className="max-w-3xl mx-auto grid grid-cols-3 py-2 px-2">
+          <button
+            type="button"
+            onClick={() => setActiveTab('dashboard')}
+            className={`flex flex-col items-center gap-1 py-1 rounded-xl text-xs font-medium transition ${
+              activeTab === 'dashboard' ? 'text-rose-400' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <BarChart3 className="w-4 h-4" />
+            <span>统计看板</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('logs')}
+            className={`flex flex-col items-center gap-1 py-1 rounded-xl text-xs font-medium transition ${
+              activeTab === 'logs' ? 'text-rose-400' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>复盘记录</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('playbook')}
+            className={`flex flex-col items-center gap-1 py-1 rounded-xl text-xs font-medium transition ${
+              activeTab === 'playbook' ? 'text-rose-400' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>策略手册</span>
+          </button>
+        </div>
+      </nav>
+
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full max-w-lg bg-[#131722] border border-slate-800 rounded-t-3xl sm:rounded-2xl max-h-[90vh] overflow-y-auto p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h2 className="text-base font-bold text-white">新增打板复盘记录</h2>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateRecord} className="space-y-3.5">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">交易日期</label>
+                  <input
+                    type="date"
+                    value={form.date}
+                    onChange={(e) => setForm({ ...form, date: e.target.value })}
+                    className="w-full rounded-xl bg-[#0D1017] border border-slate-700 px-3 py-2 text-sm text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">股票代码</label>
+                  <input
+                    type="text"
+                    placeholder="如 002265"
+                    value={form.code}
+                    onChange={(e) => setForm({ ...form, code: e.target.value })}
+                    className="w-full rounded-xl bg-[#0D1017] border border-slate-700 px-3 py-2 text-sm text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">股票名称 *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="如 海翔药业"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    className="w-full rounded-xl bg-[#0D1017] border border-slate-700 px-3 py-2 text-sm text-white"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">介入价格</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    placeholder="如 7.82"
+                    value={form.entryPrice}
+                    onChange={(e) => setForm({ ...form, entryPrice: e.target.value })}
+                    className="w-full rounded-xl bg-[#0D1017] border border-slate-700 px-3 py-2 text-sm text-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">打板模式</label>
+                  <select
+                    value={form.mode}
+                    onChange={(e) => setForm({ ...form, mode: e.target.value })}
+                    className="w-full rounded-xl bg-[#0D1017] border border-slate-700 px-3 py-2 text-sm text-white"
+                  >
+                    {MODES.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.label}（{m.tag}）
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">连板高度</label>
+                  <select
+                    value={form.boardTier}
+                    onChange={(e) => setForm({ ...form, boardTier: e.target.value })}
+                    className="w-full rounded-xl bg-[#0D1017] border border-slate-700 px-3 py-2 text-sm text-white"
+                  >
+                    {BOARD_TIERS.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">次日溢价率（%）</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="正数填如 6.4，负数填如 -2.8"
+                  value={form.nextDayReturn}
+                  onChange={(e) => setForm({ ...form, nextDayReturn: e.target.value })}
+                  className="w-full rounded-xl bg-[#0D1017] border border-slate-700 px-3 py-2 text-sm text-white"
+                />
+              </div>
+
+              <div className="flex items-center gap-5 pt-1">
+                <label className="inline-flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.isSuccess}
+                    onChange={(e) => setForm({ ...form, isSuccess: e.target.checked })}
+                    className="rounded accent-emerald-500 w-4 h-4"
+                  />
+                  <span>打板成功</span>
+                </label>
+
+                <label className="inline-flex items-center gap-2 text-sm text-slate-200 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.isBurst}
+                    onChange={(e) => setForm({ ...form, isBurst: e.target.checked })}
+                    className="rounded accent-amber-500 w-4 h-4"
+                  />
+                  <span>发生炸板</span>
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">复盘要点与情绪逻辑</label>
+                <textarea
+                  rows={3}
+                  placeholder="记录封单强度、板块带动性、分时承接与次日离场依据..."
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                  className="w-full rounded-xl bg-[#0D1017] border border-slate-700 px-3 py-2 text-sm text-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">上传分时 / K线截图（可选）</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleImageUpload}
+                  className="block w-full text-xs text-slate-400 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-white hover:file:bg-slate-700"
+                />
+                {form.chartImage && (
+                  <div className="mt-2 relative rounded-xl overflow-hidden border border-slate-800 max-h-40">
+                    <img
+                      src={form.chartImage}
+                      alt="预览截图"
+                      className="w-full h-36 object-cover"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setForm({ ...form, chartImage: '' })}
+                      className="absolute top-2 right-2 px-2 py-1 rounded bg-black/75 text-xs text-white"
+                    >
+                      移除
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2 flex gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="flex-1 py-2.5 rounded-xl bg-slate-800 text-slate-300 text-sm font-medium"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-sm font-semibold"
+                >
+                  保存记录
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {previewImage && (
+        <div
+          onClick={() => setPreviewImage('')}
+          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+        >
+          <button
+            type="button"
+            onClick={() => setPreviewImage('')}
+            aria-label="关闭预览"
+            className="absolute top-4 right-4 p-2 rounded-full bg-white/10 text-white"
+          >
+            <X className="w-5 h-5" />
+          </button>
+          <img
+            src={previewImage}
+            alt="复盘图表放大"
+            className="max-w-full max-h-[85vh] rounded-xl object-contain"
+          />
+        </div>
+      )}
+    </div>
+  );
+}
