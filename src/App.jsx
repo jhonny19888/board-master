@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Flame,
   Plus,
@@ -10,12 +10,26 @@ import {
   BarChart3,
   BookOpen,
   ClipboardList,
+  Wallet,
+  ShieldCheck,
+  TrendingUp,
+  Layers,
 } from 'lucide-react';
 
-const STORAGE_KEY = 'boardmaster_records_v2';
-const INIT_FLAG_KEY = 'boardmaster_initialized_v2';
+const STORAGE_KEY = 'boardmaster_records_v22';
+const INIT_FLAG_KEY = 'boardmaster_initialized_v22';
+const CAPITAL_STORAGE_KEY = 'boardmaster_total_capital_v22';
 
-// 打板模式选项（已包含“连板分歧水下低吸”）
+const BOARD_LADDER_LEVELS = [
+  '首板',
+  '2板',
+  '3板',
+  '4板',
+  '5板',
+  '6进7板+',
+];
+
+// 打板模式（含“连板分歧水下低吸”）
 const STRATEGY_MODES = [
   '半路（板前卡位博弈）',
   '排板（确定性封单）',
@@ -24,7 +38,7 @@ const STRATEGY_MODES = [
   '龙头首阴反包',
 ];
 
-// 封板结果选项（已包含“冲板未封”）
+// 封板状态（含“冲板未封”）
 const SEAL_STATUS_OPTIONS = [
   {
     value: 'success',
@@ -82,7 +96,7 @@ const INITIAL_SAMPLE_RECORDS = [
   },
 ];
 
-// 自动压缩上传的截图，防止撑爆 localStorage 5MB 容量导致保存失败
+// 自动压缩上传的截图，防止撑爆 localStorage 容量导致保存失败
 function compressImageFile(file, maxWidth = 800, quality = 0.65) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -105,13 +119,29 @@ function compressImageFile(file, maxWidth = 800, quality = 0.65) {
   });
 }
 
+function normalizeBoardHeight(height) {
+  if (!height) return '首板';
+  if (height.includes('5板以上') || height.includes('5板及以上')) return '6进7板+';
+  return BOARD_LADDER_LEVELS.includes(height) ? height : '首板';
+}
+
 export default function App() {
-  const [totalCapital] = useState(100000);
+  const [totalCapital, setTotalCapital] = useState(() => {
+    try {
+      const saved = localStorage.getItem(CAPITAL_STORAGE_KEY);
+      const parsed = saved ? parseFloat(saved) : 100000;
+      return !isNaN(parsed) && parsed > 0 ? parsed : 100000;
+    } catch {
+      return 100000;
+    }
+  });
+  const [capitalInput, setCapitalInput] = useState(() => String(totalCapital));
+
   const [activeTab, setActiveTab] = useState('records');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
-  // 初始化读取 localStorage（删空后重开不会自动回填示例数据）
+  // 初始化读取 localStorage（区分首次使用与用户主动删空）
   const [records, setRecords] = useState(() => {
     try {
       const initialized = localStorage.getItem(INIT_FLAG_KEY);
@@ -127,7 +157,6 @@ export default function App() {
     }
   });
 
-  // 每次变更同步写入 localStorage
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
@@ -136,6 +165,14 @@ export default function App() {
       alert('本地存储空间已满，当前记录可能未保存成功！建议先删除部分带截图的旧记录。');
     }
   }, [records]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CAPITAL_STORAGE_KEY, String(totalCapital));
+    } catch {
+      // 忽略存储异常
+    }
+  }, [totalCapital]);
 
   const emptyForm = {
     date: new Date().toISOString().slice(0, 10),
@@ -157,6 +194,15 @@ export default function App() {
 
   const [form, setForm] = useState(emptyForm);
 
+  const handleUpdateCapital = () => {
+    const val = parseFloat(capitalInput);
+    if (!isNaN(val) && val > 0) {
+      setTotalCapital(val);
+    } else {
+      alert('请输入大于 0 的总资金数字');
+    }
+  };
+
   const handlePositionChange = (val) => {
     const pct = parseFloat(val);
     const autoAmount =
@@ -171,341 +217,4 @@ export default function App() {
   const toggleSealStatus = (statusValue) => {
     setForm((prev) => ({
       ...prev,
-      sealStatus: prev.sealStatus === statusValue ? '' : statusValue,
-    }));
-  };
-
-  const handleImageUpload = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const compressedDataUrl = await compressImageFile(file);
-      setForm((prev) => ({ ...prev, screenshot: compressedDataUrl }));
-    } catch {
-      alert('图片处理失败，请重试或换一张截图');
-    }
-  };
-
-  const openCreateModal = () => {
-    setEditingId(null);
-    setForm(emptyForm);
-    setIsModalOpen(true);
-  };
-
-  const openEditModal = (record) => {
-    setEditingId(record.id);
-    setForm({
-      ...record,
-      entryPrice: String(record.entryPrice ?? ''),
-      positionPct: String(record.positionPct ?? ''),
-      amount: String(record.amount ?? ''),
-      nextDayPremium: String(record.nextDayPremium ?? ''),
-      sealStatus: record.sealStatus ?? '',
-    });
-    setIsModalOpen(true);
-  };
-
-  const handleSaveRecord = (e) => {
-    e.preventDefault();
-    if (!form.name.trim()) {
-      alert('请填写股票名称');
-      return;
-    }
-
-    const payload = {
-      id: editingId || `rec-${Date.now()}`,
-      date: form.date,
-      code: form.code.trim(),
-      name: form.name.trim(),
-      sector: form.sector.trim() || '未分类',
-      entryPrice: parseFloat(form.entryPrice) || 0,
-      positionPct: parseFloat(form.positionPct) || 0,
-      amount: parseFloat(form.amount) || 0,
-      mode: form.mode,
-      boardHeight: form.boardHeight,
-      emotionPhase: form.emotionPhase,
-      discipline: form.discipline,
-      nextDayPremium: parseFloat(form.nextDayPremium) || 0,
-      sealStatus: form.sealStatus,
-      notes: form.notes.trim(),
-      screenshot: form.screenshot,
-    };
-
-    if (editingId) {
-      setRecords((prev) =>
-        prev.map((item) => (item.id === editingId ? payload : item))
-      );
-    } else {
-      setRecords((prev) => [payload, ...prev]);
-    }
-    setIsModalOpen(false);
-  };
-
-  const handleDeleteRecord = (id) => {
-    setRecords((prev) => prev.filter((item) => item.id !== id));
-  };
-
-  const totalUsedAmount = records.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
-  const usedPct = ((totalUsedAmount / totalCapital) * 100).toFixed(1);
-
-  return (
-    <div className="min-h-screen bg-[#0B0E17] text-slate-100 pb-24 font-sans">
-      {/* 顶部资金与操作栏（带 v2.1 生效标记） */}
-      <header className="sticky top-0 z-20 bg-[#0B0E17]/95 backdrop-blur border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-orange-500 flex items-center justify-center shadow-lg shadow-rose-500/20">
-            <Flame className="w-5 h-5 text-white" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="font-bold text-base tracking-tight">BoardMaster</h1>
-              <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30">
-                专业复盘终端 v2.1
-              </span>
-            </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              总资金 {totalCapital.toLocaleString()} · 累计仓位{' '}
-              {totalUsedAmount.toLocaleString()} ({usedPct}%)
-            </p>
-          </div>
-        </div>
-
-        <button
-          onClick={openCreateModal}
-          className="bg-rose-600 hover:bg-rose-500 active:scale-95 transition text-white text-sm font-medium px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-lg shadow-rose-600/25"
-        >
-          <Plus className="w-4 h-4" />
-          <span>记一笔</span>
-        </button>
-      </header>
-
-      {/* 复盘记录卡片列表 */}
-      <main className="max-w-xl mx-auto px-4 pt-4 space-y-4">
-        {records.length === 0 ? (
-          <div className="text-center py-16 bg-[#131826] rounded-2xl border border-slate-800/80">
-            <p className="text-slate-400 text-sm">暂无复盘记录</p>
-            <button
-              onClick={openCreateModal}
-              className="mt-3 text-rose-400 text-sm underline"
-            >
-              点击右上角“记一笔”开始记录
-            </button>
-          </div>
-        ) : (
-          records.map((rec) => {
-            const profitAmount = Math.round(
-              ((Number(rec.amount) || 0) * (Number(rec.nextDayPremium) || 0)) / 100
-            );
-            const isPositive = rec.nextDayPremium >= 0;
-            const sealMeta = SEAL_STATUS_OPTIONS.find(
-              (opt) => opt.value === rec.sealStatus
-            );
-            const shortModeLabel = rec.mode.includes('（')
-              ? rec.mode.split('（')[0]
-              : rec.mode;
-
-            return (
-              <article
-                key={rec.id}
-                className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 shadow-md"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h2 className="text-lg font-bold text-white">{rec.name}</h2>
-                      {rec.code && (
-                        <span className="text-xs text-slate-400 font-mono">
-                          {rec.code}
-                        </span>
-                      )}
-                      <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                        {rec.sector}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 flex-wrap mt-2.5">
-                      <span className="text-xs px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30">
-                        {shortModeLabel}
-                      </span>
-                      <span className="text-xs px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                        {rec.boardHeight}
-                      </span>
-                      <span className="text-xs px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
-                        {rec.emotionPhase}
-                      </span>
-                      {sealMeta && (
-                        <span
-                          className={`text-xs px-2 py-0.5 rounded ${sealMeta.badgeClass}`}
-                        >
-                          {sealMeta.label}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className="mt-2">
-                      <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                        {rec.discipline}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="text-right shrink-0">
-                    <div className="flex items-center justify-end gap-2">
-                      <div>
-                        <div className="text-[11px] text-slate-400">次日溢价</div>
-                        <div
-                          className={`text-lg font-bold font-mono ${
-                            isPositive ? 'text-rose-400' : 'text-emerald-400'
-                          }`}
-                        >
-                          {isPositive
-                            ? `+${rec.nextDayPremium}%`
-                            : `${rec.nextDayPremium}%`}
-                        </div>
-                        <div
-                          className={`text-xs font-mono ${
-                            isPositive
-                              ? 'text-rose-400/90'
-                              : 'text-emerald-400/90'
-                          }`}
-                        >
-                          {isPositive
-                            ? `+${profitAmount.toLocaleString()}`
-                            : profitAmount.toLocaleString()}
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col gap-2 pl-2 border-l border-slate-800">
-                        <button
-                          onClick={() => openEditModal(rec)}
-                          className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
-                          title="编辑记录"
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteRecord(rec.id)}
-                          className="p-1.5 text-slate-400 hover:text-rose-400 rounded-lg hover:bg-slate-800"
-                          title="删除记录"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="mt-3 pt-3 border-t border-slate-800/80 text-xs text-slate-300 space-y-1">
-                  <div>日期：{rec.date}</div>
-                  <div className="flex items-center gap-4">
-                    <span>介入价：{rec.entryPrice}</span>
-                    <span>仓位：{rec.positionPct}%</span>
-                  </div>
-                  <div>金额：{Number(rec.amount).toLocaleString()}</div>
-                </div>
-
-                {rec.notes && (
-                  <div className="mt-3 p-3 rounded-xl bg-[#0D111C] border border-slate-800/80 text-xs text-slate-300 leading-relaxed">
-                    {rec.notes}
-                  </div>
-                )}
-
-                {rec.screenshot && (
-                  <div className="mt-3">
-                    <img
-                      src={rec.screenshot}
-                      alt={`${rec.name}复盘截图`}
-                      className="w-full max-h-48 object-cover rounded-xl border border-slate-800"
-                    />
-                  </div>
-                )}
-              </article>
-            );
-          })
-        )}
-      </main>
-
-      {/* 底部导航栏 */}
-      <nav className="fixed bottom-0 inset-x-0 bg-[#0B0E17]/95 backdrop-blur border-t border-slate-800/80 flex justify-around py-2 text-xs">
-        <button
-          onClick={() => setActiveTab('stats')}
-          className={`flex flex-col items-center gap-1 ${
-            activeTab === 'stats' ? 'text-rose-400' : 'text-slate-400'
-          }`}
-        >
-          <BarChart3 className="w-4 h-4" />
-          <span>统计看板</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('records')}
-          className={`flex flex-col items-center gap-1 ${
-            activeTab === 'records' ? 'text-rose-400' : 'text-slate-400'
-          }`}
-        >
-          <ClipboardList className="w-4 h-4" />
-          <span>复盘记录</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('playbook')}
-          className={`flex flex-col items-center gap-1 ${
-            activeTab === 'playbook' ? 'text-rose-400' : 'text-slate-400'
-          }`}
-        >
-          <BookOpen className="w-4 h-4" />
-          <span>策略手册</span>
-        </button>
-      </nav>
-
-      {/* 新增 / 编辑复盘弹窗 */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
-          <form
-            onSubmit={handleSaveRecord}
-            className="w-full max-w-lg max-h-[92vh] overflow-y-auto bg-[#131826] border border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 space-y-4"
-          >
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-bold">
-                {editingId ? '编辑复盘记录' : '新增复盘记录'}
-              </h3>
-              <button
-                type="button"
-                onClick={() => setIsModalOpen(false)}
-                className="p-1 text-slate-400 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                type="date"
-                value={form.date}
-                onChange={(e) => setForm({ ...form, date: e.target.value })}
-                className="bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2.5 text-sm"
-              />
-              <input
-                type="text"
-                placeholder="股票代码 如 002996"
-                value={form.code}
-                onChange={(e) => setForm({ ...form, code: e.target.value })}
-                className="bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2.5 text-sm"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">股票名称 *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="如 百洋股份"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2.5 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">所属题材 / 板块</label>
-                <input
-                  type="text"
-                  placeholder="如 农产品
+      sealStatus: prev
