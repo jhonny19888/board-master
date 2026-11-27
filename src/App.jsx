@@ -1,8 +1,25 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 
-const STORAGE_KEY = 'boardmaster_records_v24';
-const INIT_FLAG_KEY = 'boardmaster_initialized_v24';
-const CAPITAL_STORAGE_KEY = 'boardmaster_total_capital_v24';
+// 固定统一存储键名，避免后续更新版本时因换 Key 导致记录看不见
+const STORAGE_KEY = 'boardmaster_records_main';
+const INIT_FLAG_KEY = 'boardmaster_initialized_main';
+const CAPITAL_STORAGE_KEY = 'boardmaster_total_capital_main';
+
+// 兼容扫描历史上可能用过的旧键名
+const LEGACY_RECORD_KEYS = [
+  'boardmaster_records_v24',
+  'boardmaster_records_v23',
+  'boardmaster_records_v22',
+  'boardmaster_records_v2',
+  'boardmaster_records',
+];
+
+const LEGACY_CAPITAL_KEYS = [
+  'boardmaster_total_capital_v24',
+  'boardmaster_total_capital_v23',
+  'boardmaster_total_capital_v22',
+  'boardmaster_total_capital',
+];
 
 const BOARD_LADDER_LEVELS = [
   '首板',
@@ -105,48 +122,92 @@ function normalizeBoardHeight(height) {
   return BOARD_LADDER_LEVELS.includes(height) ? height : '首板';
 }
 
-export default function App() {
-  const [totalCapital, setTotalCapital] = useState(() => {
-    try {
-      const saved = localStorage.getItem(CAPITAL_STORAGE_KEY);
-      const parsed = saved ? parseFloat(saved) : 100000;
-      return !isNaN(parsed) && parsed > 0 ? parsed : 100000;
-    } catch {
-      return 100000;
+function loadInitialCapital() {
+  try {
+    const saved = localStorage.getItem(CAPITAL_STORAGE_KEY);
+    if (saved) {
+      const parsed = parseFloat(saved);
+      if (!isNaN(parsed) && parsed > 0) return parsed;
     }
-  });
+    for (const key of LEGACY_CAPITAL_KEYS) {
+      const oldVal = localStorage.getItem(key);
+      if (oldVal) {
+        const parsed = parseFloat(oldVal);
+        if (!isNaN(parsed) && parsed > 0) return parsed;
+      }
+    }
+    return 100000;
+  } catch {
+    return 100000;
+  }
+}
 
+function loadInitialRecords() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw !== null) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+
+    // 主键为空时，尝试从历史旧键名自动找回
+    for (const key of LEGACY_RECORD_KEYS) {
+      const oldRaw = localStorage.getItem(key);
+      if (oldRaw) {
+        const parsed = JSON.parse(oldRaw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    }
+
+    const initialized = localStorage.getItem(INIT_FLAG_KEY);
+    if (!initialized) {
+      localStorage.setItem(INIT_FLAG_KEY, 'true');
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify(INITIAL_SAMPLE_RECORDS)
+      );
+      return INITIAL_SAMPLE_RECORDS;
+    }
+
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+export default function App() {
+  const [totalCapital, setTotalCapital] = useState(loadInitialCapital);
   const [capitalInput, setCapitalInput] = useState(() => String(totalCapital));
   const [activeTab, setActiveTab] = useState('records');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [records, setRecords] = useState(loadInitialRecords);
 
-  // 初始化读取 localStorage（删空记录后重开不会自动回填示例数据）
-  const [records, setRecords] = useState(() => {
+  // 备份与导入弹窗状态
+  const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
+  const [backupText, setBackupText] = useState('');
+  const [importText, setImportText] = useState('');
+  const [importMode, setImportMode] = useState('merge'); // 'merge' 合并去重 | 'replace' 覆盖当前
+  const [lastBackupTime, setLastBackupTime] = useState(() => {
     try {
-      const initialized = localStorage.getItem(INIT_FLAG_KEY);
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!initialized) {
-        localStorage.setItem(INIT_FLAG_KEY, 'true');
-        localStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify(INITIAL_SAMPLE_RECORDS)
-        );
-        return INITIAL_SAMPLE_RECORDS;
-      }
-      return raw ? JSON.parse(raw) : [];
+      return localStorage.getItem('boardmaster_last_backup_time') || '';
     } catch {
-      return [];
+      return '';
     }
   });
 
+  const fileInputRef = useRef(null);
+
   useEffect(() => {
     try {
+      localStorage.setItem(INIT_FLAG_KEY, 'true');
       localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
     } catch (err) {
       console.error('保存失败:', err);
       alert(
-        '本地存储空间已满，当前记录可能未保存成功！建议先删除部分带截图的旧记录。'
+        '本地存储空间已满，当前记录可能未保存成功！建议先导出备份，再删除部分带截图的旧记录。'
       );
     }
   }, [records]);
@@ -175,6 +236,217 @@ export default function App() {
   };
 
   const [form, setForm] = useState(emptyForm);
+
+  const buildBackupPayload = () => ({
+    app: 'BoardMaster',
+    version: 'v2.5',
+    exportedAt: new Date().toISOString(),
+    totalCapital,
+    recordsCount: records.length,
+    records,
+  });
+
+  const triggerDownloadJson = (payload) => {
+    const jsonStr = JSON.stringify(payload, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    link.href = url;
+    link.download = `boardmaster-backup-${stamp}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    return jsonStr;
+  };
+
+  // 一键备份：下载 JSON 文件 + 复制到剪贴板 + 更新备份时间
+  const handleOneClickBackup = async () => {
+    try {
+      const payload = buildBackupPayload();
+      const jsonStr = triggerDownloadJson(payload);
+      setBackupText(jsonStr);
+
+      const nowStr = new Date().toLocaleString();
+      setLastBackupTime(nowStr);
+      try {
+        localStorage.setItem('boardmaster_last_backup_time', nowStr);
+      } catch {
+        // 忽略存储异常
+      }
+
+      let copied = false;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        try {
+          await navigator.clipboard.writeText(jsonStr);
+          copied = true;
+        } catch {
+          copied = false;
+        }
+      }
+
+      alert(
+        `备份完成（共 ${records.length} 条记录）！\n` +
+          `• 已下载 .json 备份文件\n` +
+          (copied
+            ? '• 已复制备份内容到剪贴板，可直接粘贴到「备忘录」保存'
+            : '• 如需文本备份，可在“备份 / 导入”窗口中手动复制')
+      );
+    } catch (err) {
+      alert(`备份失败：${err.message}`);
+    }
+  };
+
+  // 打开备份/导入面板并刷新最新导出内容
+  const openBackupModal = () => {
+    const payload = buildBackupPayload();
+    setBackupText(JSON.stringify(payload, null, 2));
+    setIsBackupModalOpen(true);
+  };
+
+  // 仅导出下载 JSON 文件
+  const handleExportFileOnly = () => {
+    try {
+      const payload = buildBackupPayload();
+      const jsonStr = triggerDownloadJson(payload);
+      setBackupText(jsonStr);
+      const nowStr = new Date().toLocaleString();
+      setLastBackupTime(nowStr);
+      localStorage.setItem('boardmaster_last_backup_time', nowStr);
+      alert(`已导出 ${records.length} 条记录的 JSON 文件`);
+    } catch (err) {
+      alert(`导出失败：${err.message}`);
+    }
+  };
+
+  // 复制导出文本到剪贴板
+  const handleCopyBackupText = async () => {
+    try {
+      const textToCopy =
+        backupText || JSON.stringify(buildBackupPayload(), null, 2);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+        alert('已复制备份 JSON 到剪贴板，可粘贴到手机备忘录保存');
+      } else {
+        alert('当前浏览器不支持自动复制，请长按文本框内容手动全选复制');
+      }
+    } catch {
+      alert('复制失败，请长按文本框手动全选复制');
+    }
+  };
+
+  // 应用导入的数据（支持标准备份对象或直接的 records 数组）
+  const applyImportedData = (rawString) => {
+    const trimmed = (rawString || '').trim();
+    if (!trimmed) {
+      alert('请先选择备份文件或粘贴备份 JSON 内容');
+      return;
+    }
+
+    let parsed;
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      alert('JSON 格式无效，请确认粘贴或选择的备份内容完整无缺');
+      return;
+    }
+
+    let incomingRecords = [];
+    let incomingCapital = null;
+
+    if (Array.isArray(parsed)) {
+      incomingRecords = parsed;
+    } else if (parsed && Array.isArray(parsed.records)) {
+      incomingRecords = parsed.records;
+      if (typeof parsed.totalCapital === 'number' && parsed.totalCapital > 0) {
+        incomingCapital = parsed.totalCapital;
+      }
+    } else {
+      alert('未识别到有效的复盘记录数组');
+      return;
+    }
+
+    const cleanedRecords = incomingRecords
+      .filter((item) => item && typeof item === 'object' && item.name)
+      .map((item, idx) => ({
+        id: item.id || `imported-${Date.now()}-${idx}`,
+        date: item.date || new Date().toISOString().slice(0, 10),
+        code: String(item.code || '').trim(),
+        name: String(item.name || '').trim(),
+        sector: String(item.sector || '未分类').trim() || '未分类',
+        mode: item.mode || '半路（板前卡位博弈）',
+        boardHeight: normalizeBoardHeight(item.boardHeight),
+        emotionPhase: item.emotionPhase || '启动试盘',
+        discipline: item.discipline || '严守纪律',
+        nextDayPremium: Number(item.nextDayPremium) || 0,
+        sealStatus:
+          item.sealStatus === 'success' ||
+          item.sealStatus === 'broken' ||
+          item.sealStatus === 'unsealed'
+            ? item.sealStatus
+            : '',
+        notes: String(item.notes || ''),
+        screenshot: typeof item.screenshot === 'string' ? item.screenshot : '',
+      }));
+
+    if (cleanedRecords.length === 0) {
+      alert('备份中没有找到可导入的有效记录');
+      return;
+    }
+
+    if (importMode === 'replace') {
+      setRecords(cleanedRecords);
+    } else {
+      setRecords((prev) => {
+        const existingIds = new Set(prev.map((r) => r.id));
+        const existingSignatures = new Set(
+          prev.map(
+            (r) => `${r.date}|${r.code}|${r.name}|${r.mode}|${r.nextDayPremium}`
+          )
+        );
+        const toAdd = cleanedRecords.filter((item) => {
+          const sig = `${item.date}|${item.code}|${item.name}|${item.mode}|${item.nextDayPremium}`;
+          if (existingIds.has(item.id) || existingSignatures.has(sig)) {
+            return false;
+          }
+          existingIds.add(item.id);
+          existingSignatures.add(sig);
+          return true;
+        });
+        return [...toAdd, ...prev];
+      });
+    }
+
+    if (incomingCapital !== null) {
+      setTotalCapital(incomingCapital);
+      setCapitalInput(String(incomingCapital));
+    }
+
+    setImportText('');
+    setIsBackupModalOpen(false);
+    alert(
+      `导入成功！本次读取到 ${cleanedRecords.length} 条记录（模式：${
+        importMode === 'replace' ? '覆盖当前' : '合并去重'
+      }）`
+    );
+  };
+
+  const handleImportFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = String(event.target?.result || '');
+      setImportText(content);
+      applyImportedData(content);
+    };
+    reader.onerror = () => {
+      alert('读取备份文件失败，请重试');
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
 
   const handleUpdateCapital = () => {
     const val = parseFloat(capitalInput);
@@ -344,35 +616,85 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0B0E17] text-slate-100 pb-24 font-sans">
       {/* 顶部资金与操作栏 */}
-      <header className="sticky top-0 z-20 bg-[#0B0E17]/95 backdrop-blur border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-orange-500 flex items-center justify-center shadow-lg shadow-rose-500/20 text-lg font-bold">
+      <header className="sticky top-0 z-20 bg-[#0B0E17]/95 backdrop-blur border-b border-slate-800/80 px-4 py-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-orange-500 flex items-center justify-center shadow-lg shadow-rose-500/20 text-lg font-bold shrink-0">
             🔥
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="font-bold text-base tracking-tight">BoardMaster</h1>
-              <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30">
-                专业复盘终端 v2.4
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <h1 className="font-bold text-base tracking-tight truncate">
+                BoardMaster
+              </h1>
+              <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30 shrink-0">
+                v2.5
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">
-              总资金 {totalCapital.toLocaleString()} · 共 {stats.count} 笔记录
+            <p className="text-xs text-slate-400 mt-0.5 truncate">
+              总资金 {totalCapital.toLocaleString()} · 共 {stats.count} 笔
             </p>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={openCreateModal}
-          className="bg-rose-600 hover:bg-rose-500 active:scale-95 transition text-white text-sm font-medium px-3.5 py-2 rounded-xl flex items-center gap-1 shadow-lg shadow-rose-600/25"
-        >
-          <span>+ 记一笔</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={openBackupModal}
+            className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-300 text-xs font-medium px-2.5 py-2 rounded-xl"
+          >
+            备份/导入
+          </button>
+          <button
+            type="button"
+            onClick={openCreateModal}
+            className="bg-rose-600 hover:bg-rose-500 active:scale-95 transition text-white text-xs sm:text-sm font-medium px-3 py-2 rounded-xl flex items-center gap-1 shadow-lg shadow-rose-600/25"
+          >
+            <span>+ 记一笔</span>
+          </button>
+        </div>
       </header>
 
       {/* 主内容区域 */}
       <main className="max-w-xl mx-auto px-4 pt-4 space-y-4">
+        {/* 数据备份 / 导出 / 导入快捷卡片 */}
+        <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-3.5 flex flex-col gap-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <div className="text-xs font-bold text-white">
+                数据备份、导出与导入
+              </div>
+              <div className="text-[11px] text-slate-400 mt-0.5">
+                {lastBackupTime
+                  ? `上次备份：${lastBackupTime}`
+                  : '建议定期点“一键备份”留存 JSON 到手机备忘录或文件'}
+              </div>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={handleOneClickBackup}
+                className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold"
+              >
+                一键备份
+              </button>
+              <button
+                type="button"
+                onClick={handleExportFileOnly}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs"
+              >
+                导出
+              </button>
+              <button
+                type="button"
+                onClick={openBackupModal}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-300 text-xs"
+              >
+                导入
+              </button>
+            </div>
+          </div>
+        </section>
+
         {activeTab === 'stats' && (
           <>
             {/* 账户总资金设定 */}
@@ -527,15 +849,24 @@ export default function App() {
         {activeTab === 'records' && (
           <>
             {records.length === 0 ? (
-              <div className="text-center py-16 bg-[#131826] rounded-2xl border border-slate-800/80">
+              <div className="text-center py-16 bg-[#131826] rounded-2xl border border-slate-800/80 space-y-3">
                 <p className="text-slate-400 text-sm">暂无复盘记录</p>
-                <button
-                  type="button"
-                  onClick={openCreateModal}
-                  className="mt-3 text-rose-400 text-sm underline"
-                >
-                  点击右上角“记一笔”开始记录
-                </button>
+                <div className="flex items-center justify-center gap-4">
+                  <button
+                    type="button"
+                    onClick={openCreateModal}
+                    className="text-rose-400 text-sm underline"
+                  >
+                    点击“记一笔”开始记录
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openBackupModal}
+                    className="text-sky-400 text-sm underline"
+                  >
+                    导入备份数据
+                  </button>
+                </div>
               </div>
             ) : (
               records.map((rec) => {
@@ -719,6 +1050,126 @@ export default function App() {
           <span>策略手册</span>
         </button>
       </nav>
+
+      {/* 备份 / 导出 / 导入弹窗 */}
+      {isBackupModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full max-w-lg max-h-[92vh] overflow-y-auto bg-[#131826] border border-slate-800 rounded-t-3xl sm:rounded-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-white">
+                备份 / 导出 / 导入数据
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsBackupModalOpen(false)}
+                className="px-2 py-1 text-sm text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* 备份与导出区 */}
+            <div className="bg-[#0D111C] border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-emerald-400">
+                  1. 备份与导出当前数据（{records.length} 条）
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleExportFileOnly}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200"
+                  >
+                    下载 JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyBackupText}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-xs text-white font-semibold"
+                  >
+                    复制备份文本
+                  </button>
+                </div>
+              </div>
+              <textarea
+                rows={4}
+                readOnly
+                value={backupText}
+                className="w-full bg-[#080B12] border border-slate-800 rounded-xl p-2.5 text-[11px] font-mono text-slate-300"
+              />
+            </div>
+
+            {/* 导入恢复区 */}
+            <div className="bg-[#0D111C] border border-slate-800 rounded-2xl p-3.5 space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs font-bold text-sky-400">
+                  2. 导入恢复备份数据
+                </span>
+                <div className="flex items-center gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setImportMode('merge')}
+                    className={`px-2.5 py-1 rounded-lg border ${
+                      importMode === 'merge'
+                        ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
+                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                    }`}
+                  >
+                    合并去重
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setImportMode('replace')}
+                    className={`px-2.5 py-1 rounded-lg border ${
+                      importMode === 'replace'
+                        ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                    }`}
+                  >
+                    覆盖当前
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs text-slate-200"
+                >
+                  选择 .json 备份文件
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json,application/json,text/plain"
+                  onChange={handleImportFileChange}
+                  className="hidden"
+                />
+                <span className="text-[11px] text-slate-400">
+                  或在下方粘贴备份 JSON
+                </span>
+              </div>
+
+              <textarea
+                rows={4}
+                placeholder="粘贴之前保存的备份 JSON 文本..."
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                className="w-full bg-[#080B12] border border-slate-800 rounded-xl p-2.5 text-[11px] font-mono text-slate-200"
+              />
+
+              <button
+                type="button"
+                onClick={() => applyImportedData(importText)}
+                className="w-full py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold"
+              >
+                确认导入数据
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 新增 / 编辑复盘弹窗 */}
       {isModalOpen && (
