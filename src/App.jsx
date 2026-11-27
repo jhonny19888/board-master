@@ -15,7 +15,7 @@ import {
 const STORAGE_KEY = 'boardmaster_records_v2';
 const INIT_FLAG_KEY = 'boardmaster_initialized_v2';
 
-// 1. 打板模式选项（已加入“连板分歧水下低吸”）
+// 打板模式选项（已包含“连板分歧水下低吸”）
 const STRATEGY_MODES = [
   '半路（板前卡位博弈）',
   '排板（确定性封单）',
@@ -24,7 +24,7 @@ const STRATEGY_MODES = [
   '龙头首阴反包',
 ];
 
-// 2. 封板结果状态（已加入“冲板未封”）
+// 封板结果选项（已包含“冲板未封”）
 const SEAL_STATUS_OPTIONS = [
   {
     value: 'success',
@@ -58,7 +58,7 @@ const INITIAL_SAMPLE_RECORDS = [
     emotionPhase: '分歧博弈',
     discipline: '严守纪律',
     nextDayPremium: -2.8,
-    sealStatus: 'broken', // 'success' | 'broken' | 'unsealed' | ''
+    sealStatus: 'broken',
     notes: '午后冲板回落炸板，承接力度减弱，次日冲高乏力按纪律止损离场，未恋战。',
     screenshot: '',
   },
@@ -82,7 +82,7 @@ const INITIAL_SAMPLE_RECORDS = [
   },
 ];
 
-// 图片压缩工具：避免原图撑爆 localStorage 5MB 上限导致保存失败
+// 自动压缩上传的截图，防止撑爆 localStorage 5MB 容量导致保存失败
 function compressImageFile(file, maxWidth = 800, quality = 0.65) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -105,13 +105,13 @@ function compressImageFile(file, maxWidth = 800, quality = 0.65) {
   });
 }
 
-export default function BoardMasterApp() {
+export default function App() {
   const [totalCapital] = useState(100000);
   const [activeTab, setActiveTab] = useState('records');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
-  // 初始化读取 localStorage（区分首次使用与用户主动删空）
+  // 初始化读取 localStorage（删空后重开不会自动回填示例数据）
   const [records, setRecords] = useState(() => {
     try {
       const initialized = localStorage.getItem(INIT_FLAG_KEY);
@@ -127,7 +127,7 @@ export default function BoardMasterApp() {
     }
   });
 
-  // 每次 records 变动时安全写入 localStorage
+  // 每次变更同步写入 localStorage
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(records));
@@ -157,7 +157,6 @@ export default function BoardMasterApp() {
 
   const [form, setForm] = useState(emptyForm);
 
-  // 自动根据仓位占比计算投入金额（仍允许手动改写）
   const handlePositionChange = (val) => {
     const pct = parseFloat(val);
     const autoAmount =
@@ -169,7 +168,6 @@ export default function BoardMasterApp() {
     }));
   };
 
-  // 封板状态三选一（再次点击当前选中项可取消，适合水下低吸未冲板）
   const toggleSealStatus = (statusValue) => {
     setForm((prev) => ({
       ...prev,
@@ -177,7 +175,6 @@ export default function BoardMasterApp() {
     }));
   };
 
-  // 上传并压缩分时/K线图
   const handleImageUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -253,7 +250,7 @@ export default function BoardMasterApp() {
 
   return (
     <div className="min-h-screen bg-[#0B0E17] text-slate-100 pb-24 font-sans">
-      {/* 顶部资金与操作栏 */}
+      {/* 顶部资金与操作栏（带 v2.1 生效标记） */}
       <header className="sticky top-0 z-20 bg-[#0B0E17]/95 backdrop-blur border-b border-slate-800/80 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-orange-500 flex items-center justify-center shadow-lg shadow-rose-500/20">
@@ -263,7 +260,7 @@ export default function BoardMasterApp() {
             <div className="flex items-center gap-2">
               <h1 className="font-bold text-base tracking-tight">BoardMaster</h1>
               <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30">
-                专业复盘终端
+                专业复盘终端 v2.1
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -303,7 +300,6 @@ export default function BoardMasterApp() {
             const sealMeta = SEAL_STATUS_OPTIONS.find(
               (opt) => opt.value === rec.sealStatus
             );
-            // 简化模式短标签展示
             const shortModeLabel = rec.mode.includes('（')
               ? rec.mode.split('（')[0]
               : rec.mode;
@@ -313,7 +309,6 @@ export default function BoardMasterApp() {
                 key={rec.id}
                 className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 shadow-md"
               >
-                {/* 第一行：股票名、代码、题材 + 次日溢价与操作按钮 */}
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <div className="flex items-center gap-2 flex-wrap">
@@ -328,7 +323,6 @@ export default function BoardMasterApp() {
                       </span>
                     </div>
 
-                    {/* 标签行：模式（含连板分歧水下低吸）、连板高度、情绪、封板结果（含冲板未封） */}
                     <div className="flex items-center gap-1.5 flex-wrap mt-2.5">
                       <span className="text-xs px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30">
                         {shortModeLabel}
@@ -355,7 +349,6 @@ export default function BoardMasterApp() {
                     </div>
                   </div>
 
-                  {/* 右上角：次日溢价 + 编辑/删除 */}
                   <div className="text-right shrink-0">
                     <div className="flex items-center justify-end gap-2">
                       <div>
@@ -365,14 +358,20 @@ export default function BoardMasterApp() {
                             isPositive ? 'text-rose-400' : 'text-emerald-400'
                           }`}
                         >
-                          {isPositive ? `+${rec.nextDayPremium}%` : `${rec.nextDayPremium}%`}
+                          {isPositive
+                            ? `+${rec.nextDayPremium}%`
+                            : `${rec.nextDayPremium}%`}
                         </div>
                         <div
                           className={`text-xs font-mono ${
-                            isPositive ? 'text-rose-400/90' : 'text-emerald-400/90'
+                            isPositive
+                              ? 'text-rose-400/90'
+                              : 'text-emerald-400/90'
                           }`}
                         >
-                          {isPositive ? `+${profitAmount.toLocaleString()}` : profitAmount.toLocaleString()}
+                          {isPositive
+                            ? `+${profitAmount.toLocaleString()}`
+                            : profitAmount.toLocaleString()}
                         </div>
                       </div>
 
@@ -396,7 +395,6 @@ export default function BoardMasterApp() {
                   </div>
                 </div>
 
-                {/* 成交明细 */}
                 <div className="mt-3 pt-3 border-t border-slate-800/80 text-xs text-slate-300 space-y-1">
                   <div>日期：{rec.date}</div>
                   <div className="flex items-center gap-4">
@@ -406,14 +404,12 @@ export default function BoardMasterApp() {
                   <div>金额：{Number(rec.amount).toLocaleString()}</div>
                 </div>
 
-                {/* 复盘备注 */}
                 {rec.notes && (
                   <div className="mt-3 p-3 rounded-xl bg-[#0D111C] border border-slate-800/80 text-xs text-slate-300 leading-relaxed">
                     {rec.notes}
                   </div>
                 )}
 
-                {/* 分时/K线截图预览 */}
                 {rec.screenshot && (
                   <div className="mt-3">
                     <img
@@ -480,7 +476,6 @@ export default function BoardMasterApp() {
               </button>
             </div>
 
-            {/* 日期与股票代码 */}
             <div className="grid grid-cols-2 gap-3">
               <input
                 type="date"
@@ -497,7 +492,6 @@ export default function BoardMasterApp() {
               />
             </div>
 
-            {/* 股票名称与题材 */}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-slate-400 mb-1">股票名称 *</label>
@@ -514,34 +508,4 @@ export default function BoardMasterApp() {
                 <label className="block text-xs text-slate-400 mb-1">所属题材 / 板块</label>
                 <input
                   type="text"
-                  placeholder="如 农产品加工"
-                  value={form.sector}
-                  onChange={(e) => setForm({ ...form, sector: e.target.value })}
-                  className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2.5 text-sm"
-                />
-              </div>
-            </div>
-
-            {/* 价格、仓位、投入金额 */}
-            <div className="grid grid-cols-3 gap-2.5">
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">介入价格</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  placeholder="7.11"
-                  value={form.entryPrice}
-                  onChange={(e) => setForm({ ...form, entryPrice: e.target.value })}
-                  className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">仓位占比 (%)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  placeholder="如 25"
-                  value={form.positionPct}
-                  onChange={(e) => handlePositionChange(e.target.value)}
-                  className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2 text-sm"
-                />
+                  placeholder="如 农产品
