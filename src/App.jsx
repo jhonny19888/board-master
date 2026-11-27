@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 
-const STORAGE_KEY = 'boardmaster_records_v23';
-const INIT_FLAG_KEY = 'boardmaster_initialized_v23';
-const CAPITAL_STORAGE_KEY = 'boardmaster_total_capital_v23';
+const STORAGE_KEY = 'boardmaster_records_v24';
+const INIT_FLAG_KEY = 'boardmaster_initialized_v24';
+const CAPITAL_STORAGE_KEY = 'boardmaster_total_capital_v24';
 
 const BOARD_LADDER_LEVELS = [
   '首板',
@@ -13,7 +13,7 @@ const BOARD_LADDER_LEVELS = [
   '6进7板+',
 ];
 
-// 打板模式选项（已加入“连板分歧水下低吸”）
+// 打板模式选项
 const STRATEGY_MODES = [
   '半路（板前卡位博弈）',
   '排板（确定性封单）',
@@ -22,7 +22,7 @@ const STRATEGY_MODES = [
   '龙头首阴反包',
 ];
 
-// 封板结果选项（已加入“冲板未封”）
+// 封板结果选项
 const SEAL_STATUS_OPTIONS = [
   {
     value: 'success',
@@ -48,9 +48,6 @@ const INITIAL_SAMPLE_RECORDS = [
     code: '300059',
     name: '东方财富',
     sector: '大金融',
-    entryPrice: 24.6,
-    positionPct: 15,
-    amount: 15000,
     mode: '半路（板前卡位博弈）',
     boardHeight: '首板',
     emotionPhase: '分歧博弈',
@@ -66,9 +63,6 @@ const INITIAL_SAMPLE_RECORDS = [
     code: '600118',
     name: '中国卫星',
     sector: '商业航天',
-    entryPrice: 31.45,
-    positionPct: 30,
-    amount: 30000,
     mode: '排板（确定性封单）',
     boardHeight: '4板',
     emotionPhase: '主升发酵',
@@ -123,7 +117,7 @@ export default function App() {
   });
 
   const [capitalInput, setCapitalInput] = useState(() => String(totalCapital));
-  const [activeTab, setActiveTab] = useState('stats');
+  const [activeTab, setActiveTab] = useState('records');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
 
@@ -170,9 +164,6 @@ export default function App() {
     code: '',
     name: '',
     sector: '',
-    entryPrice: '',
-    positionPct: '',
-    amount: '',
     mode: '半路（板前卡位博弈）',
     boardHeight: '首板',
     emotionPhase: '启动试盘',
@@ -192,17 +183,6 @@ export default function App() {
     } else {
       alert('请输入大于 0 的总资金数字');
     }
-  };
-
-  const handlePositionChange = (val) => {
-    const pct = parseFloat(val);
-    const autoAmount =
-      !isNaN(pct) && pct > 0 ? Math.round((totalCapital * pct) / 100) : '';
-    setForm((prev) => ({
-      ...prev,
-      positionPct: val,
-      amount: autoAmount !== '' ? String(autoAmount) : prev.amount,
-    }));
   };
 
   const toggleSealStatus = (statusValue) => {
@@ -233,9 +213,6 @@ export default function App() {
     setEditingId(record.id);
     setForm({
       ...record,
-      entryPrice: String(record.entryPrice ?? ''),
-      positionPct: String(record.positionPct ?? ''),
-      amount: String(record.amount ?? ''),
       nextDayPremium: String(record.nextDayPremium ?? ''),
       sealStatus: record.sealStatus ?? '',
     });
@@ -255,9 +232,6 @@ export default function App() {
       code: form.code.trim(),
       name: form.name.trim(),
       sector: form.sector.trim() || '未分类',
-      entryPrice: parseFloat(form.entryPrice) || 0,
-      positionPct: parseFloat(form.positionPct) || 0,
-      amount: parseFloat(form.amount) || 0,
       mode: form.mode,
       boardHeight: form.boardHeight,
       emotionPhase: form.emotionPhase,
@@ -284,13 +258,6 @@ export default function App() {
 
   const stats = useMemo(() => {
     const count = records.length;
-    const totalAmount = records.reduce(
-      (sum, r) => sum + (Number(r.amount) || 0),
-      0
-    );
-    const usedPct =
-      totalCapital > 0 ? ((totalAmount / totalCapital) * 100).toFixed(1) : '0.0';
-
     const sealAttempts = records.filter((r) => Boolean(r.sealStatus));
     const successCount = records.filter((r) => r.sealStatus === 'success').length;
     const brokenCount = records.filter((r) => r.sealStatus === 'broken').length;
@@ -319,15 +286,6 @@ export default function App() {
             ) / count
           ).toFixed(2)
         : '0.00';
-
-    const estimatedProfit = Math.round(
-      records.reduce(
-        (sum, r) =>
-          sum +
-          ((Number(r.amount) || 0) * (Number(r.nextDayPremium) || 0)) / 100,
-        0
-      )
-    );
 
     const wins = records.filter((r) => (Number(r.nextDayPremium) || 0) > 0);
     const losses = records.filter((r) => (Number(r.nextDayPremium) || 0) < 0);
@@ -373,18 +331,15 @@ export default function App() {
 
     return {
       count,
-      totalAmount,
-      usedPct,
       successRate,
       brokenRate,
       disciplineRate,
       avgPremium: `${Number(avgPremium) >= 0 ? '+' : ''}${avgPremium}%`,
-      estimatedProfit,
       avgWin,
       avgLoss,
       ladderStats,
     };
-  }, [records, totalCapital]);
+  }, [records]);
 
   return (
     <div className="min-h-screen bg-[#0B0E17] text-slate-100 pb-24 font-sans">
@@ -398,12 +353,11 @@ export default function App() {
             <div className="flex items-center gap-2">
               <h1 className="font-bold text-base tracking-tight">BoardMaster</h1>
               <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30">
-                专业复盘终端 v2.3
+                专业复盘终端 v2.4
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              总资金 {totalCapital.toLocaleString()} · 累计仓位{' '}
-              {stats.totalAmount.toLocaleString()} ({stats.usedPct}%)
+              总资金 {totalCapital.toLocaleString()} · 共 {stats.count} 笔记录
             </p>
           </div>
         </div>
@@ -430,7 +384,7 @@ export default function App() {
                 <div>
                   <h2 className="text-sm font-bold text-white">账户总资金设定</h2>
                   <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                    输入总资金后，记录中的仓位占比、投入金额与次日盈亏金额自动联动
+                    更新账户总资金基准，方便对照当前仓位与复盘统计
                   </p>
                 </div>
               </div>
@@ -473,21 +427,20 @@ export default function App() {
 
               <div className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4">
                 <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span>仓位与金额</span>
+                  <span>炸板比例</span>
                   <span className="text-amber-400">!</span>
                 </div>
                 <div className="text-2xl font-bold font-mono text-white mt-2">
-                  {stats.usedPct}%
+                  {stats.brokenRate}%
                 </div>
                 <div className="text-xs text-slate-400 mt-1.5">
-                  累计 {stats.totalAmount.toLocaleString()} · 炸板{' '}
-                  {stats.brokenRate}%
+                  有效冲板样本统计
                 </div>
               </div>
 
               <div className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4">
                 <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span>次日均溢价 / 盈亏</span>
+                  <span>次日均溢价</span>
                   <span className="text-rose-400">↗</span>
                 </div>
                 <div
@@ -500,12 +453,7 @@ export default function App() {
                   {stats.avgPremium}
                 </div>
                 <div className="text-xs text-slate-400 mt-1.5">
-                  测算盈亏{' '}
-                  <span className="font-mono text-slate-200">
-                    {stats.estimatedProfit >= 0
-                      ? `+${stats.estimatedProfit.toLocaleString()}`
-                      : stats.estimatedProfit.toLocaleString()}
-                  </span>
+                  赢 {stats.avgWin} / 亏 {stats.avgLoss}
                 </div>
               </div>
 
@@ -518,7 +466,7 @@ export default function App() {
                   {totalCapital.toLocaleString()}
                 </div>
                 <div className="text-xs text-slate-400 mt-1.5">
-                  赢 {stats.avgWin} / 亏 {stats.avgLoss}
+                  累计 {stats.count} 笔复盘
                 </div>
               </div>
             </section>
@@ -591,11 +539,6 @@ export default function App() {
               </div>
             ) : (
               records.map((rec) => {
-                const profitAmount = Math.round(
-                  ((Number(rec.amount) || 0) *
-                    (Number(rec.nextDayPremium) || 0)) /
-                    100
-                );
                 const isPositive = rec.nextDayPremium >= 0;
                 const sealMeta = SEAL_STATUS_OPTIONS.find(
                   (opt) => opt.value === rec.sealStatus
@@ -666,17 +609,6 @@ export default function App() {
                                 ? `+${rec.nextDayPremium}%`
                                 : `${rec.nextDayPremium}%`}
                             </div>
-                            <div
-                              className={`text-xs font-mono ${
-                                isPositive
-                                  ? 'text-rose-400/90'
-                                  : 'text-emerald-400/90'
-                              }`}
-                            >
-                              {isPositive
-                                ? `+${profitAmount.toLocaleString()}`
-                                : profitAmount.toLocaleString()}
-                            </div>
                           </div>
 
                           <div className="flex flex-col gap-2 pl-2 border-l border-slate-800">
@@ -701,13 +633,8 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="mt-3 pt-3 border-t border-slate-800/80 text-xs text-slate-300 space-y-1">
+                    <div className="mt-3 pt-3 border-t border-slate-800/80 text-xs text-slate-300">
                       <div>日期：{rec.date}</div>
-                      <div className="flex items-center gap-4">
-                        <span>介入价：{rec.entryPrice}</span>
-                        <span>仓位：{rec.positionPct}%</span>
-                      </div>
-                      <div>金额：{Number(rec.amount).toLocaleString()}</div>
                     </div>
 
                     {rec.notes && (
@@ -853,49 +780,6 @@ export default function App() {
                   value={form.sector}
                   onChange={(e) => setForm({ ...form, sector: e.target.value })}
                   className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2.5 text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-3 gap-2.5">
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">
-                  介入价格
-                </label>
-                <input
-                  type="number"
-                  step="0.01"
-                  placeholder="7.11"
-                  value={form.entryPrice}
-                  onChange={(e) =>
-                    setForm({ ...form, entryPrice: e.target.value })
-                  }
-                  className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">
-                  仓位占比 (%)
-                </label>
-                <input
-                  type="number"
-                  step="0.1"
-                  placeholder="如 25"
-                  value={form.positionPct}
-                  onChange={(e) => handlePositionChange(e.target.value)}
-                  className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">
-                  投入金额
-                </label>
-                <input
-                  type="number"
-                  placeholder="自动或手填"
-                  value={form.amount}
-                  onChange={(e) => setForm({ ...form, amount: e.target.value })}
-                  className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2 text-sm"
                 />
               </div>
             </div>
