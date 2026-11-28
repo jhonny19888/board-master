@@ -25,21 +25,45 @@ const TRADE_CATEGORIES = [
   {
     value: '打板交易',
     badgeClass: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
-    desc: '排板 / 扫板 / 半路 / 水下低吸 / 冲板',
   },
   {
     value: '高位回调',
     badgeClass: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
-    desc: '高位回踩承接或分歧回落低吸',
   },
   {
     value: '模式外交易',
     badgeClass: 'bg-purple-500/15 text-purple-300 border border-purple-500/30',
-    desc: '盘中临时起意、计划外或情绪单',
   },
 ];
 
-const BOARD_LADDER_LEVELS = [
+// 按交易类型细分打法 / 买入场景
+const MODES_BY_CATEGORY = {
+  打板交易: [
+    '排板（确定性封单）',
+    '扫板（点火瞬间抢筹）',
+    '半路（板前卡位博弈）',
+    '连板分歧水下低吸',
+    '弱转强竞价/开盘抢筹',
+    '龙头首阴反包',
+  ],
+  高位回调: [
+    '高位回踩5日/10日线低吸',
+    '分时均线企稳承接低吸',
+    '连板断板次日缩量低吸',
+    '板块核心补跌后反抽',
+  ],
+  模式外交易: [
+    '盘中看到异动临时追高',
+    '看消息/吹票临时跟风',
+    '亏损后想快速回本（情绪单）',
+    '无计划随手低吸',
+    '其他模式外操作',
+  ],
+};
+
+// 连板高度选项（增加“无 / 非连板”，不污染首板数据）
+const BOARD_HEIGHT_OPTIONS = [
+  '无 / 非连板',
   '首板',
   '2板',
   '3板',
@@ -48,13 +72,21 @@ const BOARD_LADDER_LEVELS = [
   '6进7板+',
 ];
 
-const STRATEGY_MODES = [
-  '排板（确定性封单）',
-  '扫板（点火瞬间抢筹）',
-  '半路（板前卡位博弈）',
-  '连板分歧水下低吸',
-  '高位回踩承接低吸',
-  '模式外随手单',
+const LADDER_ONLY_LEVELS = [
+  '首板',
+  '2板',
+  '3板',
+  '4板',
+  '5板',
+  '6进7板+',
+];
+
+const EXIT_RESULT_OPTIONS = [
+  '次日冲高止盈',
+  '连板继续持有',
+  '不及预期果断止损',
+  '心存侥幸扛单/格局过头',
+  '平盘/微亏离场',
 ];
 
 const SEAL_STATUS_OPTIONS = [
@@ -75,6 +107,90 @@ const SEAL_STATUS_OPTIONS = [
   },
 ];
 
+// 细致版策略参考卡片
+const STRATEGY_REFERENCE_CARDS = [
+  {
+    id: 'limit-up',
+    title: '一、打板交易细则（核心主战区）',
+    subtitle: '排板 / 扫板 / 半路 / 连板分歧水下低吸 / 弱转强',
+    accentClass: 'border-rose-500/35 bg-rose-500/10 text-rose-300',
+    items: [
+      {
+        label: '1. 排板与扫板（确定性优先）',
+        text: '只做主线前排或板块共振首板/连板；扫板看点火瞬间主买大单连续性与板块跟风反应，排板看封单量占流通盘比例与炸板回封速度，后排杂毛一律不碰。',
+      },
+      {
+        label: '2. 半路与冲板未封应对',
+        text: '半路只做分时均线之上、量价齐升的卡位加速点；一旦当天出现“冲板未封”，次日早盘若不能快速弱转强反包，冲高第一时间兑现或止损，绝不幻想。',
+      },
+      {
+        label: '3. 连板分歧水下低吸',
+        text: '必须是高辨识度核心标的首度分歧下杀，看水下急跌缩量、分时双底或承接托单确认后再低吸，严禁在板块退潮日硬接放量阴跌。',
+      },
+      {
+        label: '4. 次日卖出铁律',
+        text: '竞价明显不及预期（低开幅度超预期且无承接）开盘直接处理；冲高无力跌破分时均线果断落袋，不把肉单拿成面单。',
+      },
+    ],
+  },
+  {
+    id: 'pullback',
+    title: '二、高位回调买入细则（辅助套利区）',
+    subtitle: '高位回踩均线 / 分时承接低吸 / 断板次日低吸',
+    accentClass: 'border-amber-500/35 bg-amber-500/10 text-amber-300',
+    items: [
+      {
+        label: '1. 入场前提（只做强转调整，不做退潮破位）',
+        text: '标的必须是本轮题材核心或连板龙头的首度调整，且题材大方向未彻底熄火；连续高位放巨量滞涨、跌破关键支撑的直接放弃。',
+      },
+      {
+        label: '2. 买点确认细节',
+        text: '等回调到 5日/10日线或前高平台附近，观察分时是否出现“下杀缩量、拉起放量”，在确认止跌企稳后再出手，不在盘中直线跳水时伸手接刀。',
+      },
+      {
+        label: '3. 仓位与止损边界',
+        text: '高位回调单笔仓位不超过打板单的一半；买入后若收盘前或次日直接跌破支撑位，无条件止损，严禁补仓摊薄成本。',
+      },
+    ],
+  },
+  {
+    id: 'out-of-mode',
+    title: '三、模式外交易隔离与风控（防回撤关键）',
+    subtitle: '盘中临时追高 / 听消息跟风 / 亏损上头回本单',
+    accentClass: 'border-purple-500/35 bg-purple-500/10 text-purple-300',
+    items: [
+      {
+        label: '1. 为什么要诚实记录模式外交易',
+        text: '复盘最怕自欺欺人——把冲动追高硬归类成“半路打板”。单独标出“模式外交易”，统计它到底占了多少笔、赢了多少、亏了多少，数据会直接告诉你该不该管住手。',
+      },
+      {
+        label: '2. 高发诱因自查',
+        text: '① 踏空主线后焦虑，去买后排补涨异动；② 盘中刷到消息或别人吹票直接市价追入；③ 上一笔亏钱后急于当天扳本，放大仓位乱出手。',
+      },
+      {
+        label: '3. 隔离处置原则',
+        text: '凡是盘前计划列表之外、临时起意的单子，一律记入“模式外交易”；次日无论盈亏优先减仓或清仓回归主模式，连续出现 2 笔以上模式外亏损时强制空仓冷静半天。',
+      },
+    ],
+  },
+  {
+    id: 'review-discipline',
+    title: '四、每日复盘自检清单',
+    subtitle: '区分“模式亏损”与“情绪亏损”',
+    accentClass: 'border-sky-500/35 bg-sky-500/10 text-sky-300',
+    items: [
+      {
+        label: '每晚三问',
+        text: '① 今天有几笔是完全符合打板/回调模式的计划内交易？② 模式内交易亏钱是因为大环境退潮还是买点细节没抠好？③ 今天有没有手痒做模式外交易，下一次怎么提前拦住？',
+      },
+      {
+        label: '数据安全习惯',
+        text: '存储键名已永久固定，正常更新代码不会丢记录；但建议每周或大改版前点一次顶部“备份/导入 → 一键备份”，把 JSON 存到手机备忘录留底。',
+      },
+    ],
+  },
+];
+
 const INITIAL_SAMPLE_RECORDS = [
   {
     id: 'sample-1',
@@ -87,9 +203,10 @@ const INITIAL_SAMPLE_RECORDS = [
     boardHeight: '首板',
     emotionPhase: '分歧博弈',
     discipline: '严守纪律',
+    exitResult: '不及预期果断止损',
     nextDayPremium: -2.8,
     sealStatus: 'broken',
-    notes: '午后冲板回落炸板，次日冲高乏力按纪律止损离场。',
+    notes: '午后冲板回落炸板，次日早盘冲高无力按纪律止损离场，控制住回撤。',
     screenshot: '',
   },
   {
@@ -103,9 +220,10 @@ const INITIAL_SAMPLE_RECORDS = [
     boardHeight: '4板',
     emotionPhase: '主升发酵',
     discipline: '严守纪律',
+    exitResult: '次日冲高止盈',
     nextDayPremium: 8.9,
     sealStatus: 'success',
-    notes: '板块核心梯队领涨，封单稳固成交，次日连板溢价明显。',
+    notes: '板块核心梯队领涨，封单稳固成交，次日连板溢价兑现。',
     screenshot: '',
   },
 ];
@@ -134,10 +252,11 @@ function compressImageFile(file, maxWidth = 800, quality = 0.65) {
 
 function normalizeBoardHeight(height) {
   if (!height) return '首板';
+  if (height === '无 / 非连板' || height === '非连板') return '无 / 非连板';
   if (height.includes('5板以上') || height.includes('5板及以上')) {
     return '6进7板+';
   }
-  return BOARD_LADDER_LEVELS.includes(height) ? height : '首板';
+  return BOARD_HEIGHT_OPTIONS.includes(height) ? height : '首板';
 }
 
 function inferCategoryFromRecord(rec) {
@@ -148,10 +267,19 @@ function inferCategoryFromRecord(rec) {
   ) {
     return rec.category;
   }
-  if (rec.discipline === '冲动追高' || String(rec.mode || '').includes('模式外')) {
+  if (
+    rec.discipline === '冲动追高' ||
+    String(rec.mode || '').includes('模式外') ||
+    String(rec.mode || '').includes('随手') ||
+    String(rec.mode || '').includes('情绪单')
+  ) {
     return '模式外交易';
   }
-  if (String(rec.mode || '').includes('回调') || String(rec.mode || '').includes('回踩')) {
+  if (
+    String(rec.mode || '').includes('回调') ||
+    String(rec.mode || '').includes('回踩') ||
+    String(rec.mode || '').includes('断板')
+  ) {
     return '高位回调';
   }
   return '打板交易';
@@ -186,6 +314,7 @@ function loadInitialRecords() {
         return parsed.map((r) => ({
           ...r,
           category: inferCategoryFromRecord(r),
+          boardHeight: normalizeBoardHeight(r.boardHeight),
         }));
       }
     }
@@ -198,6 +327,7 @@ function loadInitialRecords() {
           return parsed.map((r) => ({
             ...r,
             category: inferCategoryFromRecord(r),
+            boardHeight: normalizeBoardHeight(r.boardHeight),
           }));
         }
       }
@@ -222,7 +352,7 @@ function loadInitialRecords() {
 export default function App() {
   const [totalCapital, setTotalCapital] = useState(loadInitialCapital);
   const [capitalInput, setCapitalInput] = useState(() => String(totalCapital));
-  const [activeTab, setActiveTab] = useState('stats');
+  const [activeTab, setActiveTab] = useState('stats'); // 'stats' | 'records' | 'playbook'
   const [categoryFilter, setCategoryFilter] = useState('全部');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -269,10 +399,11 @@ export default function App() {
     name: '',
     sector: '',
     category: '打板交易',
-    mode: '排板（确定性封单）',
+    mode: MODES_BY_CATEGORY['打板交易'][0],
     boardHeight: '首板',
     emotionPhase: '启动试盘',
     discipline: '严守纪律',
+    exitResult: '次日冲高止盈',
     nextDayPremium: '',
     sealStatus: 'success',
     notes: '',
@@ -281,32 +412,23 @@ export default function App() {
 
   const [form, setForm] = useState(emptyForm);
 
+  // 切换“交易类型”时，自动联动匹配细分打法、连板高度和封板结果默认值
   const handleCategorySelectInForm = (catValue) => {
-    setForm((prev) => {
-      let nextMode = prev.mode;
-      if (catValue === '高位回调' && !prev.mode.includes('回调') && !prev.mode.includes('回踩')) {
-        nextMode = '高位回踩承接低吸';
-      } else if (catValue === '模式外交易' && !prev.mode.includes('模式外')) {
-        nextMode = '模式外随手单';
-      } else if (
-        catValue === '打板交易' &&
-        (prev.mode.includes('回调') ||
-          prev.mode.includes('回踩') ||
-          prev.mode.includes('模式外'))
-      ) {
-        nextMode = '排板（确定性封单）';
-      }
-      return {
-        ...prev,
-        category: catValue,
-        mode: nextMode,
-      };
-    });
+    const modeOptions = MODES_BY_CATEGORY[catValue] || MODES_BY_CATEGORY['打板交易'];
+    setForm((prev) => ({
+      ...prev,
+      category: catValue,
+      mode: modeOptions[0],
+      boardHeight: catValue === '打板交易' ? '首板' : '无 / 非连板',
+      sealStatus: catValue === '打板交易' ? 'success' : '',
+      discipline:
+        catValue === '模式外交易' ? '模式外随手单' : '严守纪律',
+    }));
   };
 
   const buildBackupPayload = () => ({
     app: 'BoardMaster',
-    version: 'v2.6',
+    version: 'v2.8',
     exportedAt: new Date().toISOString(),
     totalCapital,
     recordsCount: records.length,
@@ -442,6 +564,7 @@ export default function App() {
         boardHeight: normalizeBoardHeight(item.boardHeight),
         emotionPhase: item.emotionPhase || '启动试盘',
         discipline: item.discipline || '严守纪律',
+        exitResult: item.exitResult || '次日冲高止盈',
         nextDayPremium: Number(item.nextDayPremium) || 0,
         sealStatus:
           item.sealStatus === 'success' ||
@@ -547,9 +670,12 @@ export default function App() {
 
   const openEditModal = (record) => {
     setEditingId(record.id);
+    const cat = inferCategoryFromRecord(record);
     setForm({
       ...record,
-      category: inferCategoryFromRecord(record),
+      category: cat,
+      boardHeight: normalizeBoardHeight(record.boardHeight),
+      exitResult: record.exitResult || '次日冲高止盈',
       nextDayPremium: String(record.nextDayPremium ?? ''),
       sealStatus: record.sealStatus ?? '',
     });
@@ -574,6 +700,7 @@ export default function App() {
       boardHeight: form.boardHeight,
       emotionPhase: form.emotionPhase,
       discipline: form.discipline,
+      exitResult: form.exitResult,
       nextDayPremium: parseFloat(form.nextDayPremium) || 0,
       sealStatus: form.sealStatus,
       notes: form.notes.trim(),
@@ -605,11 +732,9 @@ export default function App() {
       const winItems = list.filter((r) => (Number(r.nextDayPremium) || 0) > 0);
       const lossItems = list.filter((r) => (Number(r.nextDayPremium) || 0) < 0);
 
-      // 交易胜率：次日溢价 > 0 的单子占比
       const winRate =
         count > 0 ? ((winItems.length / count) * 100).toFixed(1) : '0.0';
 
-      // 打板封板成功率：有封板结果标签的单子中“打板成功”占比
       const sealAttempts = list.filter((r) => Boolean(r.sealStatus));
       const sealSuccess = list.filter((r) => r.sealStatus === 'success').length;
       const sealRate =
@@ -617,7 +742,6 @@ export default function App() {
           ? ((sealSuccess / sealAttempts.length) * 100).toFixed(1)
           : null;
 
-      // 平均次日溢价 / 盈亏表现
       const avgPremNum =
         count > 0
           ? list.reduce((s, r) => s + (Number(r.nextDayPremium) || 0), 0) /
@@ -656,7 +780,6 @@ export default function App() {
 
     const overall = calcGroupMetrics(records);
 
-    // 三大交易类型独立统计
     const byCategory = TRADE_CATEGORIES.map((cat) => {
       const items = records.filter(
         (r) => inferCategoryFromRecord(r) === cat.value
@@ -667,7 +790,30 @@ export default function App() {
       };
     });
 
-    const ladderStats = BOARD_LADDER_LEVELS.map((level) => {
+    // 细分打法 / 场景统计（只展示有记录的打法，按笔数排序）
+    const modeMap = new Map();
+    records.forEach((r) => {
+      const key = `${inferCategoryFromRecord(r)}||${r.mode || '未分类'}`;
+      if (!modeMap.has(key)) {
+        modeMap.set(key, {
+          category: inferCategoryFromRecord(r),
+          mode: r.mode || '未分类',
+          items: [],
+        });
+      }
+      modeMap.get(key).items.push(r);
+    });
+
+    const bySubMode = Array.from(modeMap.values())
+      .map((entry) => ({
+        category: entry.category,
+        mode: entry.mode,
+        metrics: calcGroupMetrics(entry.items),
+      }))
+      .sort((a, b) => b.metrics.count - a.metrics.count);
+
+    // 连板高度统计（只统计“首板 ~ 6进7板+”，排除“无 / 非连板”）
+    const ladderStats = LADDER_ONLY_LEVELS.map((level) => {
       const items = records.filter(
         (r) => normalizeBoardHeight(r.boardHeight) === level
       );
@@ -684,9 +830,13 @@ export default function App() {
     return {
       overall,
       byCategory,
+      bySubMode,
       ladderStats,
     };
   }, [records]);
+
+  const currentModeOptions =
+    MODES_BY_CATEGORY[form.category] || MODES_BY_CATEGORY['打板交易'];
 
   return (
     <div className="min-h-screen bg-[#0B0E17] text-slate-100 pb-24 font-sans">
@@ -702,7 +852,7 @@ export default function App() {
                 BoardMaster
               </h1>
               <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30 shrink-0">
-                v2.6
+                v2.8 细致版
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5 truncate">
@@ -736,7 +886,9 @@ export default function App() {
           <div className="min-w-0">
             <div className="text-xs font-bold text-white">数据备份与恢复</div>
             <div className="text-[11px] text-slate-400 truncate mt-0.5">
-              {lastBackupTime ? `上次备份：${lastBackupTime}` : '建议定期备份到本地或备忘录'}
+              {lastBackupTime
+                ? `上次备份：${lastBackupTime}`
+                : '建议定期备份到本地或备忘录'}
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -766,15 +918,15 @@ export default function App() {
 
         {activeTab === 'stats' && (
           <>
-            {/* 三大交易类型拆账统计（打板 / 高位回调 / 模式外交易） */}
+            {/* 三大交易类型拆账统计 */}
             <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-sm font-bold text-white">
-                    按交易类型统计成功率与盈亏
+                    三大交易类型成功率与盈亏
                   </h2>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    对比打板、高位回调与模式外交易的胜率、均溢价与累计溢价
+                    打板交易 vs 高位回调 vs 模式外交易
                   </p>
                 </div>
                 <span className="text-xs text-slate-400 font-mono">
@@ -864,11 +1016,80 @@ export default function App() {
               </div>
             </section>
 
-            {/* 连板高度梯队统计 */}
+            {/* 细分打法 / 场景排行榜 */}
+            {stats.bySubMode.length > 0 && (
+              <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-sm font-bold text-white">
+                      细分打法与诱因拆解
+                    </h2>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      精确对比排板、半路、水下低吸、回调及各类模式外表现
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  {stats.bySubMode.map((sub) => {
+                    const m = sub.metrics;
+                    const shortName = sub.mode.includes('（')
+                      ? sub.mode.split('（')[0]
+                      : sub.mode;
+                    const catMeta = TRADE_CATEGORIES.find(
+                      (c) => c.value === sub.category
+                    );
+
+                    return (
+                      <div
+                        key={`${sub.category}-${sub.mode}`}
+                        className="bg-[#0D111C] border border-slate-800/80 rounded-xl p-3 flex items-center justify-between gap-2"
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                catMeta?.badgeClass ||
+                                'bg-slate-800 text-slate-300'
+                              }`}
+                            >
+                              {sub.category}
+                            </span>
+                            <span className="text-xs font-semibold text-slate-100 truncate">
+                              {shortName}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-1 font-mono">
+                            共 {m.count} 笔 · 胜率 {m.winRate}%
+                          </div>
+                        </div>
+
+                        <div className="text-right shrink-0 font-mono">
+                          <div
+                            className={`text-xs font-bold ${
+                              m.avgPremNum >= 0
+                                ? 'text-rose-400'
+                                : 'text-emerald-400'
+                            }`}
+                          >
+                            均 {m.avgPremText}
+                          </div>
+                          <div className="text-[11px] text-slate-400 mt-0.5">
+                            累计 {m.sumPremText}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+
+            {/* 连板高度统计 */}
             <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-bold text-white">连板高度统计</h2>
-                <span className="text-xs text-slate-400">首板 → 6进7板+</span>
+                <span className="text-xs text-slate-400">仅统计连板标</span>
               </div>
 
               <div className="space-y-2">
@@ -985,6 +1206,7 @@ export default function App() {
                 const shortModeLabel = rec.mode.includes('（')
                   ? rec.mode.split('（')[0]
                   : rec.mode;
+                const normalizedHeight = normalizeBoardHeight(rec.boardHeight);
 
                 return (
                   <article
@@ -1019,9 +1241,11 @@ export default function App() {
                           <span className="text-xs px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 border border-sky-500/30">
                             {shortModeLabel}
                           </span>
-                          <span className="text-xs px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                            {rec.boardHeight}
-                          </span>
+                          {normalizedHeight !== '无 / 非连板' && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              {normalizedHeight}
+                            </span>
+                          )}
                           <span className="text-xs px-2 py-0.5 rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
                             {rec.emotionPhase}
                           </span>
@@ -1034,10 +1258,15 @@ export default function App() {
                           )}
                         </div>
 
-                        <div className="mt-2">
+                        <div className="flex items-center gap-1.5 flex-wrap mt-2">
                           <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
                             {rec.discipline}
                           </span>
+                          {rec.exitResult && (
+                            <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-200 border border-slate-700">
+                              {rec.exitResult}
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -1103,6 +1332,54 @@ export default function App() {
             )}
           </>
         )}
+
+        {/* 独立“策略参考”页面 */}
+        {activeTab === 'playbook' && (
+          <div className="space-y-4">
+            <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4">
+              <h2 className="text-base font-bold text-white">
+                交易策略与执行细节参考
+              </h2>
+              <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                把打板交易、高位回调、模式外交易各自独立列出来对照，明确每类交易的入场前提、观察细节与次日处理纪律。
+              </p>
+            </section>
+
+            {STRATEGY_REFERENCE_CARDS.map((card) => (
+              <section
+                key={card.id}
+                className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 space-y-3"
+              >
+                <div>
+                  <span
+                    className={`inline-block text-xs font-bold px-2.5 py-1 rounded-lg border ${card.accentClass}`}
+                  >
+                    {card.title}
+                  </span>
+                  <div className="text-xs text-slate-400 mt-1.5">
+                    {card.subtitle}
+                  </div>
+                </div>
+
+                <div className="space-y-2.5 pt-1">
+                  {card.items.map((detail) => (
+                    <div
+                      key={detail.label}
+                      className="p-3 rounded-xl bg-[#0D111C] border border-slate-800/80 space-y-1"
+                    >
+                      <div className="text-xs font-semibold text-slate-100">
+                        {detail.label}
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        {detail.text}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        )}
       </main>
 
       {/* 底部导航栏 */}
@@ -1111,7 +1388,9 @@ export default function App() {
           type="button"
           onClick={() => setActiveTab('stats')}
           className={`flex flex-col items-center gap-1 ${
-            activeTab === 'stats' ? 'text-rose-400 font-semibold' : 'text-slate-400'
+            activeTab === 'stats'
+              ? 'text-rose-400 font-semibold'
+              : 'text-slate-400'
           }`}
         >
           <span>📊</span>
@@ -1128,6 +1407,18 @@ export default function App() {
         >
           <span>✦</span>
           <span>复盘明细</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('playbook')}
+          className={`flex flex-col items-center gap-1 ${
+            activeTab === 'playbook'
+              ? 'text-rose-400 font-semibold'
+              : 'text-slate-400'
+          }`}
+        >
+          <span>📖</span>
+          <span>策略参考</span>
         </button>
       </nav>
 
@@ -1272,7 +1563,7 @@ export default function App() {
             {/* 交易大类选择 */}
             <div>
               <label className="block text-xs text-slate-400 mb-1.5">
-                交易类型（用于独立统计成功率与盈亏）
+                1. 先选交易类型（自动匹配对应细分打法与默认项）
               </label>
               <div className="grid grid-cols-3 gap-2">
                 {TRADE_CATEGORIES.map((cat) => {
@@ -1342,14 +1633,16 @@ export default function App() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-slate-400 mb-1">
-                  具体打法 / 买入场景
+                  {form.category === '模式外交易'
+                    ? '模式外诱因 / 场景'
+                    : '细分打法 / 买点场景'}
                 </label>
                 <select
                   value={form.mode}
                   onChange={(e) => setForm({ ...form, mode: e.target.value })}
                   className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2.5 text-sm"
                 >
-                  {STRATEGY_MODES.map((m) => (
+                  {currentModeOptions.map((m) => (
                     <option key={m} value={m}>
                       {m}
                     </option>
@@ -1358,7 +1651,7 @@ export default function App() {
               </div>
               <div>
                 <label className="block text-xs text-slate-400 mb-1">
-                  连板高度
+                  连板高度（非连板选无）
                 </label>
                 <select
                   value={form.boardHeight}
@@ -1367,7 +1660,7 @@ export default function App() {
                   }
                   className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2.5 text-sm"
                 >
-                  {BOARD_LADDER_LEVELS.map((h) => (
+                  {BOARD_HEIGHT_OPTIONS.map((h) => (
                     <option key={h} value={h}>
                       {h}
                     </option>
@@ -1408,7 +1701,13 @@ export default function App() {
                   }
                   className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2.5 text-sm"
                 >
-                  {['严守纪律', '盘中微调', '冲动追高', '犹豫踏空'].map((d) => (
+                  {[
+                    '严守纪律',
+                    '盘中微调',
+                    '冲动追高',
+                    '模式外随手单',
+                    '犹豫踏空',
+                  ].map((d) => (
                     <option key={d} value={d}>
                       {d}
                     </option>
@@ -1417,20 +1716,40 @@ export default function App() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">
-                次日溢价率 (%)
-              </label>
-              <input
-                type="number"
-                step="0.01"
-                placeholder="如 5.02 或 -2.80"
-                value={form.nextDayPremium}
-                onChange={(e) =>
-                  setForm({ ...form, nextDayPremium: e.target.value })
-                }
-                className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2.5 text-sm"
-              />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  次日溢价率 (%)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  placeholder="如 5.02 或 -2.80"
+                  value={form.nextDayPremium}
+                  onChange={(e) =>
+                    setForm({ ...form, nextDayPremium: e.target.value })
+                  }
+                  className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2.5 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">
+                  卖出 / 处理结果
+                </label>
+                <select
+                  value={form.exitResult}
+                  onChange={(e) =>
+                    setForm({ ...form, exitResult: e.target.value })
+                  }
+                  className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2.5 text-sm"
+                >
+                  {EXIT_RESULT_OPTIONS.map((res) => (
+                    <option key={res} value={res}>
+                      {res}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             {/* 封板结果 */}
@@ -1472,7 +1791,7 @@ export default function App() {
               </label>
               <textarea
                 rows={3}
-                placeholder="记录买点位置、板块梯队、承接力度与次日处理逻辑..."
+                placeholder="记录买点位置、板块梯队、承接力度、卖出时机与改进点..."
                 value={form.notes}
                 onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 className="w-full bg-[#0D111C] border border-slate-700 rounded-xl p-3 text-sm"
