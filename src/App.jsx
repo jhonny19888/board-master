@@ -185,7 +185,7 @@ const STRATEGY_REFERENCE_CARDS = [
       },
       {
         label: '数据安全习惯',
-        text: '存储键名已永久固定，更改任何设置或切换日期都不会删除记录；仍建议定期点顶部“备份/导入 → 一键备份”，把 JSON 存到手机备忘录留底。',
+        text: '存储键名已永久固定，更改任何设置或切换日期都不会删除记录，单条删除也需二次确认；仍建议定期点顶部“备份/导入 → 一键备份”，把 JSON 存到手机备忘录留底。',
       },
     ],
   },
@@ -363,6 +363,9 @@ export default function App() {
   const [rangeStartDate, setRangeStartDate] = useState('');
   const [rangeEndDate, setRangeEndDate] = useState('');
 
+  // 单条记录二次确认删除状态（仅存放待确认删除的那条记录）
+  const [pendingDeleteRecord, setPendingDeleteRecord] = useState(null);
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [records, setRecords] = useState(loadInitialRecords);
@@ -436,7 +439,7 @@ export default function App() {
 
   const buildBackupPayload = () => ({
     app: 'BoardMaster',
-    version: 'v2.11',
+    version: 'v2.12',
     exportedAt: new Date().toISOString(),
     totalCapital,
     recordsCount: records.length,
@@ -730,8 +733,22 @@ export default function App() {
     setIsModalOpen(false);
   };
 
-  const handleDeleteRecord = (id) => {
-    setRecords((prev) => prev.filter((item) => item.id !== id));
+  // 第一步：点击单条记录的“删除”按钮，先弹出二次确认框，不直接删除
+  const handleRequestDeleteRecord = (record) => {
+    setPendingDeleteRecord(record);
+  };
+
+  // 第二步：在二次确认框中点击“确认删除”，才真正删除该条记录
+  const handleConfirmDeleteRecord = () => {
+    if (!pendingDeleteRecord) return;
+    const targetId = pendingDeleteRecord.id;
+    setRecords((prev) => prev.filter((item) => item.id !== targetId));
+    setPendingDeleteRecord(null);
+  };
+
+  // 取消删除，保留记录
+  const handleCancelDeleteRecord = () => {
+    setPendingDeleteRecord(null);
   };
 
   const availableDates = useMemo(() => {
@@ -761,7 +778,6 @@ export default function App() {
     return records;
   }, [records, statsDateMode, selectedSingleDate, rangeStartDate, rangeEndDate]);
 
-  // 复盘明细筛选：支持“全部”、三大交易类型，以及“首板 ~ 6进7板+”
   const filteredRecords = useMemo(() => {
     if (categoryFilter === '全部') return records;
     if (LADDER_ONLY_LEVELS.includes(categoryFilter)) {
@@ -916,7 +932,7 @@ export default function App() {
                 BoardMaster
               </h1>
               <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30 shrink-0">
-                v2.11
+                v2.12
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5 truncate">
@@ -952,7 +968,7 @@ export default function App() {
             <div className="text-[11px] text-slate-400 truncate mt-0.5">
               {lastBackupTime
                 ? `上次备份：${lastBackupTime}`
-                : '更改任何设置或切换日期不会删记录'}
+                : '更改设置或切日期不会删记录，删除需二次确认'}
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -1320,7 +1336,7 @@ export default function App() {
 
         {activeTab === 'records' && (
           <>
-            {/* 复盘明细横向筛选栏（保留原有类型 + 增加首板 ~ 6进7板+） */}
+            {/* 复盘明细横向筛选栏 */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1">
               {recordFilterTabs.map((tabName) => {
                 const active = categoryFilter === tabName;
@@ -1456,7 +1472,7 @@ export default function App() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleDeleteRecord(rec.id)}
+                              onClick={() => handleRequestDeleteRecord(rec)}
                               className="px-2 py-1 text-xs text-rose-400 hover:text-rose-300 rounded-lg bg-slate-800/80 hover:bg-slate-800"
                             >
                               删除
@@ -1540,6 +1556,48 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* 单条记录删除二次确认弹窗 */}
+      {pendingDeleteRecord && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-[#131826] border border-rose-500/35 rounded-2xl p-5 space-y-4 shadow-2xl">
+            <div className="space-y-1.5">
+              <div className="text-xs font-semibold text-rose-400">
+                二次确认删除记录
+              </div>
+              <h3 className="text-base font-bold text-white">
+                确定要删除 {pendingDeleteRecord.name}
+                {pendingDeleteRecord.code ? `（${pendingDeleteRecord.code}）` : ''}
+                吗？
+              </h3>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                日期：{pendingDeleteRecord.date} · 次日溢价：
+                {pendingDeleteRecord.nextDayPremium >= 0
+                  ? `+${pendingDeleteRecord.nextDayPremium}%`
+                  : `${pendingDeleteRecord.nextDayPremium}%`}
+                。删除后将从当前记录中移除，若点“取消”则完整保留。
+              </p>
+            </div>
+
+            <div className="flex gap-3 pt-1">
+              <button
+                type="button"
+                onClick={handleCancelDeleteRecord}
+                className="flex-1 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold"
+              >
+                取消（保留记录）
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeleteRecord}
+                className="flex-1 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold"
+              >
+                确认删除
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 底部导航栏 */}
       <nav className="fixed bottom-0 inset-x-0 bg-[#0B0E17]/95 backdrop-blur border-t border-slate-800/80 flex justify-around py-2.5 text-xs">
