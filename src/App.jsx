@@ -185,7 +185,7 @@ const STRATEGY_REFERENCE_CARDS = [
       },
       {
         label: '数据安全习惯',
-        text: '存储键名已永久固定，正常更新代码不会丢记录；但建议每周或大改版前点一次顶部“备份/导入 → 一键备份”，把 JSON 存到手机备忘录留底。',
+        text: '存储键名已永久固定，更改任何设置都不会删除记录；仍建议定期点顶部“备份/导入 → 一键备份”，把 JSON 存到手机备忘录留底。',
       },
     ],
   },
@@ -358,7 +358,7 @@ export default function App() {
   const [editingId, setEditingId] = useState(null);
   const [records, setRecords] = useState(loadInitialRecords);
 
-  // 备份与导入弹窗状态
+  // 备份与导入弹窗状态（默认只合并追加，不覆盖现有记录）
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [backupText, setBackupText] = useState('');
   const [importText, setImportText] = useState('');
@@ -373,6 +373,7 @@ export default function App() {
 
   const fileInputRef = useRef(null);
 
+  // 保存记录到 localStorage；若存储超限则只提示，绝不清空当前记录
   useEffect(() => {
     try {
       localStorage.setItem(INIT_FLAG_KEY, 'true');
@@ -380,11 +381,12 @@ export default function App() {
     } catch (err) {
       console.error('保存失败:', err);
       alert(
-        '本地存储空间已满，当前记录可能未保存成功！建议先导出备份，再删除部分带截图的旧记录。'
+        '本地存储空间已满，新改动暂时未能写入浏览器存储！请先点“一键备份”留存，再清理部分带截图的旧记录。'
       );
     }
   }, [records]);
 
+  // 仅更新总资金基准，绝不触碰 records
   useEffect(() => {
     try {
       localStorage.setItem(CAPITAL_STORAGE_KEY, String(totalCapital));
@@ -412,23 +414,22 @@ export default function App() {
 
   const [form, setForm] = useState(emptyForm);
 
-  // 切换“交易类型”时，自动联动匹配细分打法、连板高度和封板结果默认值
   const handleCategorySelectInForm = (catValue) => {
-    const modeOptions = MODES_BY_CATEGORY[catValue] || MODES_BY_CATEGORY['打板交易'];
+    const modeOptions =
+      MODES_BY_CATEGORY[catValue] || MODES_BY_CATEGORY['打板交易'];
     setForm((prev) => ({
       ...prev,
       category: catValue,
       mode: modeOptions[0],
       boardHeight: catValue === '打板交易' ? '首板' : '无 / 非连板',
       sealStatus: catValue === '打板交易' ? 'success' : '',
-      discipline:
-        catValue === '模式外交易' ? '模式外随手单' : '严守纪律',
+      discipline: catValue === '模式外交易' ? '模式外随手单' : '严守纪律',
     }));
   };
 
   const buildBackupPayload = () => ({
     app: 'BoardMaster',
-    version: 'v2.8',
+    version: 'v2.9',
     exportedAt: new Date().toISOString(),
     totalCapital,
     recordsCount: records.length,
@@ -521,6 +522,7 @@ export default function App() {
     }
   };
 
+  // 导入数据：默认合并去重；即使选覆盖也需确认且不为空才生效
   const applyImportedData = (rawString) => {
     const trimmed = (rawString || '').trim();
     if (!trimmed) {
@@ -547,7 +549,7 @@ export default function App() {
         incomingCapital = parsed.totalCapital;
       }
     } else {
-      alert('未识别到有效的复盘记录数组');
+      alert('未识别到有效的复盘记录数组，现有记录未受任何影响');
       return;
     }
 
@@ -577,11 +579,15 @@ export default function App() {
       }));
 
     if (cleanedRecords.length === 0) {
-      alert('备份中没有找到可导入的有效记录');
+      alert('备份中没有找到可导入的有效记录，现有记录已保留');
       return;
     }
 
     if (importMode === 'replace') {
+      const confirmed = window.confirm(
+        `“覆盖当前”会用导入的 ${cleanedRecords.length} 条记录替换当前现有的 ${records.length} 条记录，确定继续吗？`
+      );
+      if (!confirmed) return;
       setRecords(cleanedRecords);
     } else {
       setRecords((prev) => {
@@ -613,8 +619,8 @@ export default function App() {
     setImportText('');
     setIsBackupModalOpen(false);
     alert(
-      `导入成功！本次读取到 ${cleanedRecords.length} 条记录（模式：${
-        importMode === 'replace' ? '覆盖当前' : '合并去重'
+      `导入完成！本次读取到 ${cleanedRecords.length} 条记录（模式：${
+        importMode === 'replace' ? '覆盖当前' : '合并去重（保留原有记录）'
       }）`
     );
   };
@@ -629,7 +635,7 @@ export default function App() {
       applyImportedData(content);
     };
     reader.onerror = () => {
-      alert('读取备份文件失败，请重试');
+      alert('读取备份文件失败，现有记录未受影响');
     };
     reader.readAsText(file);
     e.target.value = '';
@@ -639,6 +645,7 @@ export default function App() {
     const val = parseFloat(capitalInput);
     if (!isNaN(val) && val > 0) {
       setTotalCapital(val);
+      alert('总资金已更新，现有复盘记录完整保留');
     } else {
       alert('请输入大于 0 的总资金数字');
     }
@@ -717,6 +724,7 @@ export default function App() {
     setIsModalOpen(false);
   };
 
+  // 仅当用户明确点击单条记录的“删除”按钮时才删除该条记录
   const handleDeleteRecord = (id) => {
     setRecords((prev) => prev.filter((item) => item.id !== id));
   };
@@ -790,7 +798,6 @@ export default function App() {
       };
     });
 
-    // 细分打法 / 场景统计（只展示有记录的打法，按笔数排序）
     const modeMap = new Map();
     records.forEach((r) => {
       const key = `${inferCategoryFromRecord(r)}||${r.mode || '未分类'}`;
@@ -812,7 +819,6 @@ export default function App() {
       }))
       .sort((a, b) => b.metrics.count - a.metrics.count);
 
-    // 连板高度统计（只统计“首板 ~ 6进7板+”，排除“无 / 非连板”）
     const ladderStats = LADDER_ONLY_LEVELS.map((level) => {
       const items = records.filter(
         (r) => normalizeBoardHeight(r.boardHeight) === level
@@ -852,7 +858,7 @@ export default function App() {
                 BoardMaster
               </h1>
               <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30 shrink-0">
-                v2.8 细致版
+                v2.9
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5 truncate">
@@ -888,7 +894,7 @@ export default function App() {
             <div className="text-[11px] text-slate-400 truncate mt-0.5">
               {lastBackupTime
                 ? `上次备份：${lastBackupTime}`
-                : '建议定期备份到本地或备忘录'}
+                : '更改任何设置不会删记录，建议定期备份留底'}
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -1484,7 +1490,7 @@ export default function App() {
                         : 'bg-slate-800 text-slate-400 border-slate-700'
                     }`}
                   >
-                    合并去重
+                    合并去重（推荐）
                   </button>
                   <button
                     type="button"
