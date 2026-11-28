@@ -5,7 +5,6 @@ const STORAGE_KEY = 'boardmaster_records_main';
 const INIT_FLAG_KEY = 'boardmaster_initialized_main';
 const CAPITAL_STORAGE_KEY = 'boardmaster_total_capital_main';
 
-// 兼容扫描历史上可能用过的旧键名
 const LEGACY_RECORD_KEYS = [
   'boardmaster_records_v24',
   'boardmaster_records_v23',
@@ -21,6 +20,25 @@ const LEGACY_CAPITAL_KEYS = [
   'boardmaster_total_capital',
 ];
 
+// 三大交易类型（核心统计维度）
+const TRADE_CATEGORIES = [
+  {
+    value: '打板交易',
+    badgeClass: 'bg-rose-500/15 text-rose-300 border border-rose-500/30',
+    desc: '排板 / 扫板 / 半路 / 水下低吸 / 冲板',
+  },
+  {
+    value: '高位回调',
+    badgeClass: 'bg-amber-500/15 text-amber-300 border border-amber-500/30',
+    desc: '高位回踩承接或分歧回落低吸',
+  },
+  {
+    value: '模式外交易',
+    badgeClass: 'bg-purple-500/15 text-purple-300 border border-purple-500/30',
+    desc: '盘中临时起意、计划外或情绪单',
+  },
+];
+
 const BOARD_LADDER_LEVELS = [
   '首板',
   '2板',
@@ -30,16 +48,15 @@ const BOARD_LADDER_LEVELS = [
   '6进7板+',
 ];
 
-// 打板模式选项
 const STRATEGY_MODES = [
-  '半路（板前卡位博弈）',
   '排板（确定性封单）',
   '扫板（点火瞬间抢筹）',
+  '半路（板前卡位博弈）',
   '连板分歧水下低吸',
-  '龙头首阴反包',
+  '高位回踩承接低吸',
+  '模式外随手单',
 ];
 
-// 封板结果选项
 const SEAL_STATUS_OPTIONS = [
   {
     value: 'success',
@@ -65,13 +82,14 @@ const INITIAL_SAMPLE_RECORDS = [
     code: '300059',
     name: '东方财富',
     sector: '大金融',
+    category: '打板交易',
     mode: '半路（板前卡位博弈）',
     boardHeight: '首板',
     emotionPhase: '分歧博弈',
     discipline: '严守纪律',
     nextDayPremium: -2.8,
     sealStatus: 'broken',
-    notes: '午后冲板回落炸板，承接力度减弱，次日冲高乏力按纪律止损离场，未恋战。',
+    notes: '午后冲板回落炸板，次日冲高乏力按纪律止损离场。',
     screenshot: '',
   },
   {
@@ -80,18 +98,18 @@ const INITIAL_SAMPLE_RECORDS = [
     code: '600118',
     name: '中国卫星',
     sector: '商业航天',
+    category: '打板交易',
     mode: '排板（确定性封单）',
     boardHeight: '4板',
     emotionPhase: '主升发酵',
     discipline: '严守纪律',
     nextDayPremium: 8.9,
     sealStatus: 'success',
-    notes: '商业航天核心梯队领涨，回封后封单稳固排板成交，次日连板溢价表现突出。',
+    notes: '板块核心梯队领涨，封单稳固成交，次日连板溢价明显。',
     screenshot: '',
   },
 ];
 
-// 自动压缩上传的分时 / K线截图，防止撑爆 localStorage 导致保存失败
 function compressImageFile(file, maxWidth = 800, quality = 0.65) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -122,6 +140,23 @@ function normalizeBoardHeight(height) {
   return BOARD_LADDER_LEVELS.includes(height) ? height : '首板';
 }
 
+function inferCategoryFromRecord(rec) {
+  if (
+    rec.category === '打板交易' ||
+    rec.category === '高位回调' ||
+    rec.category === '模式外交易'
+  ) {
+    return rec.category;
+  }
+  if (rec.discipline === '冲动追高' || String(rec.mode || '').includes('模式外')) {
+    return '模式外交易';
+  }
+  if (String(rec.mode || '').includes('回调') || String(rec.mode || '').includes('回踩')) {
+    return '高位回调';
+  }
+  return '打板交易';
+}
+
 function loadInitialCapital() {
   try {
     const saved = localStorage.getItem(CAPITAL_STORAGE_KEY);
@@ -147,16 +182,23 @@ function loadInitialRecords() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw !== null) {
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
+      if (Array.isArray(parsed)) {
+        return parsed.map((r) => ({
+          ...r,
+          category: inferCategoryFromRecord(r),
+        }));
+      }
     }
 
-    // 主键为空时，尝试从历史旧键名自动找回
     for (const key of LEGACY_RECORD_KEYS) {
       const oldRaw = localStorage.getItem(key);
       if (oldRaw) {
         const parsed = JSON.parse(oldRaw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          return parsed.map((r) => ({
+            ...r,
+            category: inferCategoryFromRecord(r),
+          }));
         }
       }
     }
@@ -180,7 +222,8 @@ function loadInitialRecords() {
 export default function App() {
   const [totalCapital, setTotalCapital] = useState(loadInitialCapital);
   const [capitalInput, setCapitalInput] = useState(() => String(totalCapital));
-  const [activeTab, setActiveTab] = useState('records');
+  const [activeTab, setActiveTab] = useState('stats');
+  const [categoryFilter, setCategoryFilter] = useState('全部');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [records, setRecords] = useState(loadInitialRecords);
@@ -189,7 +232,7 @@ export default function App() {
   const [isBackupModalOpen, setIsBackupModalOpen] = useState(false);
   const [backupText, setBackupText] = useState('');
   const [importText, setImportText] = useState('');
-  const [importMode, setImportMode] = useState('merge'); // 'merge' 合并去重 | 'replace' 覆盖当前
+  const [importMode, setImportMode] = useState('merge');
   const [lastBackupTime, setLastBackupTime] = useState(() => {
     try {
       return localStorage.getItem('boardmaster_last_backup_time') || '';
@@ -225,7 +268,8 @@ export default function App() {
     code: '',
     name: '',
     sector: '',
-    mode: '半路（板前卡位博弈）',
+    category: '打板交易',
+    mode: '排板（确定性封单）',
     boardHeight: '首板',
     emotionPhase: '启动试盘',
     discipline: '严守纪律',
@@ -237,9 +281,32 @@ export default function App() {
 
   const [form, setForm] = useState(emptyForm);
 
+  const handleCategorySelectInForm = (catValue) => {
+    setForm((prev) => {
+      let nextMode = prev.mode;
+      if (catValue === '高位回调' && !prev.mode.includes('回调') && !prev.mode.includes('回踩')) {
+        nextMode = '高位回踩承接低吸';
+      } else if (catValue === '模式外交易' && !prev.mode.includes('模式外')) {
+        nextMode = '模式外随手单';
+      } else if (
+        catValue === '打板交易' &&
+        (prev.mode.includes('回调') ||
+          prev.mode.includes('回踩') ||
+          prev.mode.includes('模式外'))
+      ) {
+        nextMode = '排板（确定性封单）';
+      }
+      return {
+        ...prev,
+        category: catValue,
+        mode: nextMode,
+      };
+    });
+  };
+
   const buildBackupPayload = () => ({
     app: 'BoardMaster',
-    version: 'v2.5',
+    version: 'v2.6',
     exportedAt: new Date().toISOString(),
     totalCapital,
     recordsCount: records.length,
@@ -261,7 +328,6 @@ export default function App() {
     return jsonStr;
   };
 
-  // 一键备份：下载 JSON 文件 + 复制到剪贴板 + 更新备份时间
   const handleOneClickBackup = async () => {
     try {
       const payload = buildBackupPayload();
@@ -298,14 +364,12 @@ export default function App() {
     }
   };
 
-  // 打开备份/导入面板并刷新最新导出内容
   const openBackupModal = () => {
     const payload = buildBackupPayload();
     setBackupText(JSON.stringify(payload, null, 2));
     setIsBackupModalOpen(true);
   };
 
-  // 仅导出下载 JSON 文件
   const handleExportFileOnly = () => {
     try {
       const payload = buildBackupPayload();
@@ -320,7 +384,6 @@ export default function App() {
     }
   };
 
-  // 复制导出文本到剪贴板
   const handleCopyBackupText = async () => {
     try {
       const textToCopy =
@@ -336,7 +399,6 @@ export default function App() {
     }
   };
 
-  // 应用导入的数据（支持标准备份对象或直接的 records 数组）
   const applyImportedData = (rawString) => {
     const trimmed = (rawString || '').trim();
     if (!trimmed) {
@@ -375,7 +437,8 @@ export default function App() {
         code: String(item.code || '').trim(),
         name: String(item.name || '').trim(),
         sector: String(item.sector || '未分类').trim() || '未分类',
-        mode: item.mode || '半路（板前卡位博弈）',
+        category: inferCategoryFromRecord(item),
+        mode: item.mode || '排板（确定性封单）',
         boardHeight: normalizeBoardHeight(item.boardHeight),
         emotionPhase: item.emotionPhase || '启动试盘',
         discipline: item.discipline || '严守纪律',
@@ -402,11 +465,12 @@ export default function App() {
         const existingIds = new Set(prev.map((r) => r.id));
         const existingSignatures = new Set(
           prev.map(
-            (r) => `${r.date}|${r.code}|${r.name}|${r.mode}|${r.nextDayPremium}`
+            (r) =>
+              `${r.date}|${r.code}|${r.name}|${r.category}|${r.mode}|${r.nextDayPremium}`
           )
         );
         const toAdd = cleanedRecords.filter((item) => {
-          const sig = `${item.date}|${item.code}|${item.name}|${item.mode}|${item.nextDayPremium}`;
+          const sig = `${item.date}|${item.code}|${item.name}|${item.category}|${item.mode}|${item.nextDayPremium}`;
           if (existingIds.has(item.id) || existingSignatures.has(sig)) {
             return false;
           }
@@ -485,6 +549,7 @@ export default function App() {
     setEditingId(record.id);
     setForm({
       ...record,
+      category: inferCategoryFromRecord(record),
       nextDayPremium: String(record.nextDayPremium ?? ''),
       sealStatus: record.sealStatus ?? '',
     });
@@ -504,6 +569,7 @@ export default function App() {
       code: form.code.trim(),
       name: form.name.trim(),
       sector: form.sector.trim() || '未分类',
+      category: form.category,
       mode: form.mode,
       boardHeight: form.boardHeight,
       emotionPhase: form.emotionPhase,
@@ -528,94 +594,103 @@ export default function App() {
     setRecords((prev) => prev.filter((item) => item.id !== id));
   };
 
+  const filteredRecords = useMemo(() => {
+    if (categoryFilter === '全部') return records;
+    return records.filter((r) => inferCategoryFromRecord(r) === categoryFilter);
+  }, [records, categoryFilter]);
+
   const stats = useMemo(() => {
-    const count = records.length;
-    const sealAttempts = records.filter((r) => Boolean(r.sealStatus));
-    const successCount = records.filter((r) => r.sealStatus === 'success').length;
-    const brokenCount = records.filter((r) => r.sealStatus === 'broken').length;
+    const calcGroupMetrics = (list) => {
+      const count = list.length;
+      const winItems = list.filter((r) => (Number(r.nextDayPremium) || 0) > 0);
+      const lossItems = list.filter((r) => (Number(r.nextDayPremium) || 0) < 0);
 
-    const successRate =
-      sealAttempts.length > 0
-        ? ((successCount / sealAttempts.length) * 100).toFixed(1)
-        : '0.0';
-    const brokenRate =
-      sealAttempts.length > 0
-        ? ((brokenCount / sealAttempts.length) * 100).toFixed(1)
-        : '0.0';
+      // 交易胜率：次日溢价 > 0 的单子占比
+      const winRate =
+        count > 0 ? ((winItems.length / count) * 100).toFixed(1) : '0.0';
 
-    const disciplinedCount = records.filter(
-      (r) => r.discipline === '严守纪律'
-    ).length;
-    const disciplineRate =
-      count > 0 ? ((disciplinedCount / count) * 100).toFixed(0) : '0';
+      // 打板封板成功率：有封板结果标签的单子中“打板成功”占比
+      const sealAttempts = list.filter((r) => Boolean(r.sealStatus));
+      const sealSuccess = list.filter((r) => r.sealStatus === 'success').length;
+      const sealRate =
+        sealAttempts.length > 0
+          ? ((sealSuccess / sealAttempts.length) * 100).toFixed(1)
+          : null;
 
-    const avgPremium =
-      count > 0
-        ? (
-            records.reduce(
-              (sum, r) => sum + (Number(r.nextDayPremium) || 0),
-              0
-            ) / count
-          ).toFixed(2)
-        : '0.00';
+      // 平均次日溢价 / 盈亏表现
+      const avgPremNum =
+        count > 0
+          ? list.reduce((s, r) => s + (Number(r.nextDayPremium) || 0), 0) /
+            count
+          : 0;
+      const sumPremNum = list.reduce(
+        (s, r) => s + (Number(r.nextDayPremium) || 0),
+        0
+      );
 
-    const wins = records.filter((r) => (Number(r.nextDayPremium) || 0) > 0);
-    const losses = records.filter((r) => (Number(r.nextDayPremium) || 0) < 0);
-    const avgWin =
-      wins.length > 0
-        ? `+${(
-            wins.reduce((s, r) => s + Number(r.nextDayPremium), 0) / wins.length
-          ).toFixed(1)}%`
-        : '+0.0%';
-    const avgLoss =
-      losses.length > 0
-        ? `${(
-            losses.reduce((s, r) => s + Number(r.nextDayPremium), 0) / losses.length
-          ).toFixed(1)}%`
-        : '0.0%';
+      const avgWinNum =
+        winItems.length > 0
+          ? winItems.reduce((s, r) => s + Number(r.nextDayPremium), 0) /
+            winItems.length
+          : 0;
+      const avgLossNum =
+        lossItems.length > 0
+          ? lossItems.reduce((s, r) => s + Number(r.nextDayPremium), 0) /
+            lossItems.length
+          : 0;
+
+      return {
+        count,
+        winCount: winItems.length,
+        lossCount: lossItems.length,
+        winRate,
+        sealRate,
+        avgPremNum,
+        sumPremNum,
+        avgPremText: `${avgPremNum >= 0 ? '+' : ''}${avgPremNum.toFixed(2)}%`,
+        sumPremText: `${sumPremNum >= 0 ? '+' : ''}${sumPremNum.toFixed(2)}%`,
+        avgWinText: `+${avgWinNum.toFixed(1)}%`,
+        avgLossText: `${avgLossNum.toFixed(1)}%`,
+      };
+    };
+
+    const overall = calcGroupMetrics(records);
+
+    // 三大交易类型独立统计
+    const byCategory = TRADE_CATEGORIES.map((cat) => {
+      const items = records.filter(
+        (r) => inferCategoryFromRecord(r) === cat.value
+      );
+      return {
+        ...cat,
+        metrics: calcGroupMetrics(items),
+      };
+    });
 
     const ladderStats = BOARD_LADDER_LEVELS.map((level) => {
       const items = records.filter(
         (r) => normalizeBoardHeight(r.boardHeight) === level
       );
-      const levelAttempts = items.filter((r) => Boolean(r.sealStatus));
-      const levelSuccess = items.filter((r) => r.sealStatus === 'success').length;
-      const rate =
-        levelAttempts.length > 0
-          ? Math.round((levelSuccess / levelAttempts.length) * 100)
-          : 0;
-      const avgPrem =
-        items.length > 0
-          ? (
-              items.reduce(
-                (s, r) => s + (Number(r.nextDayPremium) || 0),
-                0
-              ) / items.length
-            ).toFixed(2)
-          : '0.00';
+      const m = calcGroupMetrics(items);
       return {
         level,
-        count: items.length,
-        rate,
-        avgPrem: `${Number(avgPrem) >= 0 ? '+' : ''}${avgPrem}%`,
+        count: m.count,
+        winRate: m.winRate,
+        avgPremText: m.avgPremText,
+        avgPremNum: m.avgPremNum,
       };
     });
 
     return {
-      count,
-      successRate,
-      brokenRate,
-      disciplineRate,
-      avgPremium: `${Number(avgPremium) >= 0 ? '+' : ''}${avgPremium}%`,
-      avgWin,
-      avgLoss,
+      overall,
+      byCategory,
       ladderStats,
     };
   }, [records]);
 
   return (
     <div className="min-h-screen bg-[#0B0E17] text-slate-100 pb-24 font-sans">
-      {/* 顶部资金与操作栏 */}
+      {/* 顶部栏 */}
       <header className="sticky top-0 z-20 bg-[#0B0E17]/95 backdrop-blur border-b border-slate-800/80 px-4 py-3 flex items-center justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500 to-orange-500 flex items-center justify-center shadow-lg shadow-rose-500/20 text-lg font-bold shrink-0">
@@ -627,11 +702,11 @@ export default function App() {
                 BoardMaster
               </h1>
               <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30 shrink-0">
-                v2.5
+                v2.6
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5 truncate">
-              总资金 {totalCapital.toLocaleString()} · 共 {stats.count} 笔
+              总资金 {totalCapital.toLocaleString()} · 共 {stats.overall.count} 笔
             </p>
           </div>
         </div>
@@ -656,61 +731,190 @@ export default function App() {
 
       {/* 主内容区域 */}
       <main className="max-w-xl mx-auto px-4 pt-4 space-y-4">
-        {/* 数据备份 / 导出 / 导入快捷卡片 */}
-        <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-3.5 flex flex-col gap-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-xs font-bold text-white">
-                数据备份、导出与导入
-              </div>
-              <div className="text-[11px] text-slate-400 mt-0.5">
-                {lastBackupTime
-                  ? `上次备份：${lastBackupTime}`
-                  : '建议定期点“一键备份”留存 JSON 到手机备忘录或文件'}
-              </div>
+        {/* 快捷备份条 */}
+        <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-3 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-xs font-bold text-white">数据备份与恢复</div>
+            <div className="text-[11px] text-slate-400 truncate mt-0.5">
+              {lastBackupTime ? `上次备份：${lastBackupTime}` : '建议定期备份到本地或备忘录'}
             </div>
-            <div className="flex items-center gap-1.5 shrink-0">
-              <button
-                type="button"
-                onClick={handleOneClickBackup}
-                className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold"
-              >
-                一键备份
-              </button>
-              <button
-                type="button"
-                onClick={handleExportFileOnly}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs"
-              >
-                导出
-              </button>
-              <button
-                type="button"
-                onClick={openBackupModal}
-                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-300 text-xs"
-              >
-                导入
-              </button>
-            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={handleOneClickBackup}
+              className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold"
+            >
+              一键备份
+            </button>
+            <button
+              type="button"
+              onClick={handleExportFileOnly}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs"
+            >
+              导出
+            </button>
+            <button
+              type="button"
+              onClick={openBackupModal}
+              className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-sky-300 text-xs"
+            >
+              导入
+            </button>
           </div>
         </section>
 
         {activeTab === 'stats' && (
           <>
-            {/* 账户总资金设定 */}
+            {/* 三大交易类型拆账统计（打板 / 高位回调 / 模式外交易） */}
             <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 space-y-3">
-              <div className="flex items-start gap-3">
-                <div className="w-9 h-9 rounded-xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center shrink-0 text-sm">
-                  💼
-                </div>
+              <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-sm font-bold text-white">账户总资金设定</h2>
-                  <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
-                    更新账户总资金基准，方便对照当前仓位与复盘统计
+                  <h2 className="text-sm font-bold text-white">
+                    按交易类型统计成功率与盈亏
+                  </h2>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    对比打板、高位回调与模式外交易的胜率、均溢价与累计溢价
                   </p>
                 </div>
+                <span className="text-xs text-slate-400 font-mono">
+                  总胜率 {stats.overall.winRate}%
+                </span>
               </div>
 
+              <div className="space-y-2.5">
+                {stats.byCategory.map((item) => {
+                  const m = item.metrics;
+                  const isAvgPos = m.avgPremNum >= 0;
+                  const isSumPos = m.sumPremNum >= 0;
+
+                  return (
+                    <div
+                      key={item.value}
+                      className="bg-[#0D111C] border border-slate-800/90 rounded-xl p-3.5 space-y-2.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={`text-xs font-semibold px-2.5 py-0.5 rounded-lg ${item.badgeClass}`}
+                          >
+                            {item.value}
+                          </span>
+                          <span className="text-xs text-slate-300 font-mono">
+                            {m.count} 笔（赢 {m.winCount} / 亏 {m.lossCount}）
+                          </span>
+                        </div>
+                        <span className="text-xs font-mono font-bold text-emerald-400">
+                          胜率 {m.winRate}%
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 pt-1 border-t border-slate-800/70 text-xs">
+                        <div>
+                          <div className="text-[11px] text-slate-400">
+                            次日均溢价
+                          </div>
+                          <div
+                            className={`font-mono font-semibold mt-0.5 ${
+                              isAvgPos ? 'text-rose-400' : 'text-emerald-400'
+                            }`}
+                          >
+                            {m.avgPremText}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-[11px] text-slate-400">
+                            累计溢价和
+                          </div>
+                          <div
+                            className={`font-mono font-semibold mt-0.5 ${
+                              isSumPos ? 'text-rose-400' : 'text-emerald-400'
+                            }`}
+                          >
+                            {m.sumPremText}
+                          </div>
+                        </div>
+
+                        <div>
+                          <div className="text-[11px] text-slate-400">
+                            赢亏均值
+                          </div>
+                          <div className="font-mono text-slate-200 mt-0.5">
+                            <span className="text-rose-400">{m.avgWinText}</span>
+                            {' / '}
+                            <span className="text-emerald-400">
+                              {m.avgLossText}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {m.sealRate !== null && (
+                        <div className="text-[11px] text-slate-400">
+                          封板成功率：
+                          <span className="text-slate-200 font-mono">
+                            {m.sealRate}%
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* 连板高度梯队统计 */}
+            <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-bold text-white">连板高度统计</h2>
+                <span className="text-xs text-slate-400">首板 → 6进7板+</span>
+              </div>
+
+              <div className="space-y-2">
+                {stats.ladderStats.map((item) => (
+                  <div
+                    key={item.level}
+                    className="bg-[#0D111C] border border-slate-800/80 rounded-xl p-3 space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="font-semibold text-slate-200">
+                        {item.level}{' '}
+                        <span className="text-slate-400 font-normal">
+                          ({item.count} 笔)
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-3 font-mono">
+                        <span className="text-emerald-400">
+                          胜率 {item.winRate}%
+                        </span>
+                        <span
+                          className={
+                            item.avgPremNum >= 0
+                              ? 'text-rose-400'
+                              : 'text-emerald-400'
+                          }
+                        >
+                          均溢价 {item.avgPremText}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
+                      <div
+                        className="h-full rounded-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all"
+                        style={{
+                          width: `${Math.min(100, parseFloat(item.winRate) || 0)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* 账户总资金设定 */}
+            <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 space-y-2.5">
+              <h2 className="text-sm font-bold text-white">账户总资金设定</h2>
               <div className="flex items-center gap-2.5">
                 <div className="flex-1 flex items-center bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2">
                   <span className="text-slate-400 text-sm mr-2">$</span>
@@ -731,146 +935,50 @@ export default function App() {
                 </button>
               </div>
             </section>
-
-            {/* 四宫格核心指标 */}
-            <section className="grid grid-cols-2 gap-3">
-              <div className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4">
-                <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span>打板成功率</span>
-                  <span className="text-emerald-400">●</span>
-                </div>
-                <div className="text-2xl font-bold font-mono text-emerald-400 mt-2">
-                  {stats.successRate}%
-                </div>
-                <div className="text-xs text-slate-400 mt-1.5">
-                  纪律率 {stats.disciplineRate}% · {stats.count} 笔
-                </div>
-              </div>
-
-              <div className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4">
-                <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span>炸板比例</span>
-                  <span className="text-amber-400">!</span>
-                </div>
-                <div className="text-2xl font-bold font-mono text-white mt-2">
-                  {stats.brokenRate}%
-                </div>
-                <div className="text-xs text-slate-400 mt-1.5">
-                  有效冲板样本统计
-                </div>
-              </div>
-
-              <div className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4">
-                <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span>次日均溢价</span>
-                  <span className="text-rose-400">↗</span>
-                </div>
-                <div
-                  className={`text-2xl font-bold font-mono mt-2 ${
-                    parseFloat(stats.avgPremium) >= 0
-                      ? 'text-rose-400'
-                      : 'text-emerald-400'
-                  }`}
-                >
-                  {stats.avgPremium}
-                </div>
-                <div className="text-xs text-slate-400 mt-1.5">
-                  赢 {stats.avgWin} / 亏 {stats.avgLoss}
-                </div>
-              </div>
-
-              <div className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4">
-                <div className="flex items-center justify-between text-xs text-slate-400">
-                  <span>账户总资金</span>
-                  <span className="text-sky-400">▤</span>
-                </div>
-                <div className="text-xl font-bold font-mono text-sky-400 mt-2 truncate">
-                  {totalCapital.toLocaleString()}
-                </div>
-                <div className="text-xs text-slate-400 mt-1.5">
-                  累计 {stats.count} 笔复盘
-                </div>
-              </div>
-            </section>
-
-            {/* 连板高度梯队分析 */}
-            <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-amber-400">≡</span>
-                  <h2 className="text-sm font-bold text-white">
-                    连板高度梯队分析
-                  </h2>
-                </div>
-                <span className="text-xs text-slate-400">首板 → 6进7板+</span>
-              </div>
-
-              <div className="space-y-2.5">
-                {stats.ladderStats.map((item) => (
-                  <div
-                    key={item.level}
-                    className="bg-[#0D111C] border border-slate-800/80 rounded-xl p-3 space-y-2"
-                  >
-                    <div className="flex items-center justify-between text-xs">
-                      <div className="font-semibold text-slate-200">
-                        {item.level}{' '}
-                        <span className="text-slate-400 font-normal">
-                          ({item.count} 笔)
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-3 font-mono">
-                        <span className="text-emerald-400">
-                          成功率 {item.rate}%
-                        </span>
-                        <span
-                          className={
-                            parseFloat(item.avgPrem) >= 0
-                              ? 'text-rose-400'
-                              : 'text-emerald-400'
-                          }
-                        >
-                          溢价 {item.avgPrem}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="w-full h-1.5 rounded-full bg-slate-800 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-gradient-to-r from-amber-500 to-rose-500 transition-all"
-                        style={{ width: `${Math.min(100, item.rate)}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
           </>
         )}
 
         {activeTab === 'records' && (
           <>
-            {records.length === 0 ? (
+            {/* 按交易类型筛选记录 */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              {['全部', '打板交易', '高位回调', '模式外交易'].map((tabName) => {
+                const active = categoryFilter === tabName;
+                return (
+                  <button
+                    key={tabName}
+                    type="button"
+                    onClick={() => setCategoryFilter(tabName)}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 border transition ${
+                      active
+                        ? 'bg-rose-600 text-white border-rose-500'
+                        : 'bg-[#131826] text-slate-300 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    {tabName}
+                  </button>
+                );
+              })}
+            </div>
+
+            {filteredRecords.length === 0 ? (
               <div className="text-center py-16 bg-[#131826] rounded-2xl border border-slate-800/80 space-y-3">
-                <p className="text-slate-400 text-sm">暂无复盘记录</p>
-                <div className="flex items-center justify-center gap-4">
-                  <button
-                    type="button"
-                    onClick={openCreateModal}
-                    className="text-rose-400 text-sm underline"
-                  >
-                    点击“记一笔”开始记录
-                  </button>
-                  <button
-                    type="button"
-                    onClick={openBackupModal}
-                    className="text-sky-400 text-sm underline"
-                  >
-                    导入备份数据
-                  </button>
-                </div>
+                <p className="text-slate-400 text-sm">当前筛选下暂无记录</p>
+                <button
+                  type="button"
+                  onClick={openCreateModal}
+                  className="text-rose-400 text-sm underline"
+                >
+                  点击“记一笔”添加记录
+                </button>
               </div>
             ) : (
-              records.map((rec) => {
+              filteredRecords.map((rec) => {
                 const isPositive = rec.nextDayPremium >= 0;
+                const catValue = inferCategoryFromRecord(rec);
+                const catMeta = TRADE_CATEGORIES.find(
+                  (c) => c.value === catValue
+                );
                 const sealMeta = SEAL_STATUS_OPTIONS.find(
                   (opt) => opt.value === rec.sealStatus
                 );
@@ -894,6 +1002,14 @@ export default function App() {
                               {rec.code}
                             </span>
                           )}
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded ${
+                              catMeta?.badgeClass ||
+                              'bg-slate-800 text-slate-300 border border-slate-700'
+                            }`}
+                          >
+                            {catValue}
+                          </span>
                           <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
                             {rec.sector}
                           </span>
@@ -947,7 +1063,6 @@ export default function App() {
                               type="button"
                               onClick={() => openEditModal(rec)}
                               className="px-2 py-1 text-xs text-slate-300 hover:text-white rounded-lg bg-slate-800/80 hover:bg-slate-800"
-                              title="编辑记录"
                             >
                               编辑
                             </button>
@@ -955,7 +1070,6 @@ export default function App() {
                               type="button"
                               onClick={() => handleDeleteRecord(rec.id)}
                               className="px-2 py-1 text-xs text-rose-400 hover:text-rose-300 rounded-lg bg-slate-800/80 hover:bg-slate-800"
-                              title="删除记录"
                             >
                               删除
                             </button>
@@ -989,28 +1103,6 @@ export default function App() {
             )}
           </>
         )}
-
-        {activeTab === 'playbook' && (
-          <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 space-y-3">
-            <h2 className="text-base font-bold text-white">
-              短线打板与低吸执行手册
-            </h2>
-            <div className="space-y-2.5 text-xs text-slate-300 leading-relaxed">
-              <div className="p-3 rounded-xl bg-[#0D111C] border border-slate-800">
-                <div className="font-semibold text-sky-300 mb-1">
-                  连板分歧水下低吸
-                </div>
-                连板后开盘大幅下杀时，重点看水下承接力度与板块梯队是否掉队；不盲目接飞刀，严格控制仓位与次日止损纪律。
-              </div>
-              <div className="p-3 rounded-xl bg-[#0D111C] border border-slate-800">
-                <div className="font-semibold text-purple-300 mb-1">
-                  半路冲板与冲板未封
-                </div>
-                半路介入后若始终未能封死涨停，次日重点观察承接与冲高回落节奏，不恋战、按纪律处理。
-              </div>
-            </div>
-          </section>
-        )}
       </main>
 
       {/* 底部导航栏 */}
@@ -1023,7 +1115,7 @@ export default function App() {
           }`}
         >
           <span>📊</span>
-          <span>统计看板</span>
+          <span>类型盈亏统计</span>
         </button>
         <button
           type="button"
@@ -1035,19 +1127,7 @@ export default function App() {
           }`}
         >
           <span>✦</span>
-          <span>复盘记录</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setActiveTab('playbook')}
-          className={`flex flex-col items-center gap-1 ${
-            activeTab === 'playbook'
-              ? 'text-rose-400 font-semibold'
-              : 'text-slate-400'
-          }`}
-        >
-          <span>📖</span>
-          <span>策略手册</span>
+          <span>复盘明细</span>
         </button>
       </nav>
 
@@ -1068,7 +1148,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* 备份与导出区 */}
             <div className="bg-[#0D111C] border border-slate-800 rounded-2xl p-3.5 space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-emerald-400">
@@ -1099,7 +1178,6 @@ export default function App() {
               />
             </div>
 
-            {/* 导入恢复区 */}
             <div className="bg-[#0D111C] border border-slate-800 rounded-2xl p-3.5 space-y-3">
               <div className="flex items-center justify-between gap-2 flex-wrap">
                 <span className="text-xs font-bold text-sky-400">
@@ -1191,6 +1269,32 @@ export default function App() {
               </button>
             </div>
 
+            {/* 交易大类选择 */}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1.5">
+                交易类型（用于独立统计成功率与盈亏）
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {TRADE_CATEGORIES.map((cat) => {
+                  const selected = form.category === cat.value;
+                  return (
+                    <button
+                      key={cat.value}
+                      type="button"
+                      onClick={() => handleCategorySelectInForm(cat.value)}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-semibold border transition ${
+                        selected
+                          ? 'bg-rose-600 text-white border-rose-500'
+                          : 'bg-[#0D111C] text-slate-300 border-slate-700 hover:border-slate-500'
+                      }`}
+                    >
+                      {cat.value}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div className="grid grid-cols-2 gap-3">
               <input
                 type="date"
@@ -1238,7 +1342,7 @@ export default function App() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="block text-xs text-slate-400 mb-1">
-                  打板模式
+                  具体打法 / 买入场景
                 </label>
                 <select
                   value={form.mode}
@@ -1329,11 +1433,11 @@ export default function App() {
               />
             </div>
 
-            {/* 封板结果：打板成功 / 发生炸板 / 冲板未封 */}
+            {/* 封板结果 */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-xs text-slate-400">
-                  封板结果（水下低吸未冲板可不勾选）
+                  封板结果（非冲板单可不勾选）
                 </span>
               </div>
               <div className="flex flex-wrap items-center gap-4">
