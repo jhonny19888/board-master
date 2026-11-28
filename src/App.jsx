@@ -185,7 +185,7 @@ const STRATEGY_REFERENCE_CARDS = [
       },
       {
         label: '数据安全习惯',
-        text: '存储键名已永久固定，更改任何设置或切换统计日期都不会删除记录；仍建议定期点顶部“备份/导入 → 一键备份”，把 JSON 存到手机备忘录留底。',
+        text: '存储键名已永久固定，更改任何设置或切换日期都不会删除记录；仍建议定期点顶部“备份/导入 → 一键备份”，把 JSON 存到手机备忘录留底。',
       },
     ],
   },
@@ -436,7 +436,7 @@ export default function App() {
 
   const buildBackupPayload = () => ({
     app: 'BoardMaster',
-    version: 'v2.10',
+    version: 'v2.11',
     exportedAt: new Date().toISOString(),
     totalCapital,
     recordsCount: records.length,
@@ -734,7 +734,6 @@ export default function App() {
     setRecords((prev) => prev.filter((item) => item.id !== id));
   };
 
-  // 所有已有记录的去重日期列表（降序），方便快速点选查看某一天统计
   const availableDates = useMemo(() => {
     const set = new Set();
     records.forEach((r) => {
@@ -743,7 +742,6 @@ export default function App() {
     return Array.from(set).sort((a, b) => b.localeCompare(a));
   }, [records]);
 
-  // 统计页按日期过滤后的记录集合（不影响原 records）
   const statsRecords = useMemo(() => {
     if (statsDateMode === 'single') {
       if (!selectedSingleDate) return records;
@@ -763,8 +761,14 @@ export default function App() {
     return records;
   }, [records, statsDateMode, selectedSingleDate, rangeStartDate, rangeEndDate]);
 
+  // 复盘明细筛选：支持“全部”、三大交易类型，以及“首板 ~ 6进7板+”
   const filteredRecords = useMemo(() => {
     if (categoryFilter === '全部') return records;
+    if (LADDER_ONLY_LEVELS.includes(categoryFilter)) {
+      return records.filter(
+        (r) => normalizeBoardHeight(r.boardHeight) === categoryFilter
+      );
+    }
     return records.filter((r) => inferCategoryFromRecord(r) === categoryFilter);
   }, [records, categoryFilter]);
 
@@ -890,6 +894,14 @@ export default function App() {
     return '全部日期';
   }, [statsDateMode, selectedSingleDate, rangeStartDate, rangeEndDate]);
 
+  const recordFilterTabs = [
+    '全部',
+    '打板交易',
+    '高位回调',
+    '模式外交易',
+    ...LADDER_ONLY_LEVELS,
+  ];
+
   return (
     <div className="min-h-screen bg-[#0B0E17] text-slate-100 pb-24 font-sans">
       {/* 顶部栏 */}
@@ -904,7 +916,7 @@ export default function App() {
                 BoardMaster
               </h1>
               <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30 shrink-0">
-                v2.10
+                v2.11
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5 truncate">
@@ -1308,9 +1320,9 @@ export default function App() {
 
         {activeTab === 'records' && (
           <>
-            {/* 按交易类型筛选记录 */}
+            {/* 复盘明细横向筛选栏（保留原有类型 + 增加首板 ~ 6进7板+） */}
             <div className="flex items-center gap-2 overflow-x-auto pb-1">
-              {['全部', '打板交易', '高位回调', '模式外交易'].map((tabName) => {
+              {recordFilterTabs.map((tabName) => {
                 const active = categoryFilter === tabName;
                 return (
                   <button
