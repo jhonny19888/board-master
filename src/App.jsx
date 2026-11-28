@@ -185,7 +185,7 @@ const STRATEGY_REFERENCE_CARDS = [
       },
       {
         label: '数据安全习惯',
-        text: '存储键名已永久固定，更改任何设置都不会删除记录；仍建议定期点顶部“备份/导入 → 一键备份”，把 JSON 存到手机备忘录留底。',
+        text: '存储键名已永久固定，更改任何设置或切换统计日期都不会删除记录；仍建议定期点顶部“备份/导入 → 一键备份”，把 JSON 存到手机备忘录留底。',
       },
     ],
   },
@@ -354,6 +354,15 @@ export default function App() {
   const [capitalInput, setCapitalInput] = useState(() => String(totalCapital));
   const [activeTab, setActiveTab] = useState('stats'); // 'stats' | 'records' | 'playbook'
   const [categoryFilter, setCategoryFilter] = useState('全部');
+
+  // 统计页日期筛选状态：'all' 全部日期 | 'single' 指定某一天 | 'range' 日期区间
+  const [statsDateMode, setStatsDateMode] = useState('all');
+  const [selectedSingleDate, setSelectedSingleDate] = useState(() =>
+    new Date().toISOString().slice(0, 10)
+  );
+  const [rangeStartDate, setRangeStartDate] = useState('');
+  const [rangeEndDate, setRangeEndDate] = useState('');
+
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [records, setRecords] = useState(loadInitialRecords);
@@ -373,7 +382,6 @@ export default function App() {
 
   const fileInputRef = useRef(null);
 
-  // 保存记录到 localStorage；若存储超限则只提示，绝不清空当前记录
   useEffect(() => {
     try {
       localStorage.setItem(INIT_FLAG_KEY, 'true');
@@ -386,7 +394,6 @@ export default function App() {
     }
   }, [records]);
 
-  // 仅更新总资金基准，绝不触碰 records
   useEffect(() => {
     try {
       localStorage.setItem(CAPITAL_STORAGE_KEY, String(totalCapital));
@@ -429,7 +436,7 @@ export default function App() {
 
   const buildBackupPayload = () => ({
     app: 'BoardMaster',
-    version: 'v2.9',
+    version: 'v2.10',
     exportedAt: new Date().toISOString(),
     totalCapital,
     recordsCount: records.length,
@@ -522,7 +529,6 @@ export default function App() {
     }
   };
 
-  // 导入数据：默认合并去重；即使选覆盖也需确认且不为空才生效
   const applyImportedData = (rawString) => {
     const trimmed = (rawString || '').trim();
     if (!trimmed) {
@@ -724,10 +730,38 @@ export default function App() {
     setIsModalOpen(false);
   };
 
-  // 仅当用户明确点击单条记录的“删除”按钮时才删除该条记录
   const handleDeleteRecord = (id) => {
     setRecords((prev) => prev.filter((item) => item.id !== id));
   };
+
+  // 所有已有记录的去重日期列表（降序），方便快速点选查看某一天统计
+  const availableDates = useMemo(() => {
+    const set = new Set();
+    records.forEach((r) => {
+      if (r.date) set.add(String(r.date).slice(0, 10));
+    });
+    return Array.from(set).sort((a, b) => b.localeCompare(a));
+  }, [records]);
+
+  // 统计页按日期过滤后的记录集合（不影响原 records）
+  const statsRecords = useMemo(() => {
+    if (statsDateMode === 'single') {
+      if (!selectedSingleDate) return records;
+      return records.filter(
+        (r) => String(r.date || '').slice(0, 10) === selectedSingleDate
+      );
+    }
+    if (statsDateMode === 'range') {
+      return records.filter((r) => {
+        const d = String(r.date || '').slice(0, 10);
+        if (!d) return false;
+        if (rangeStartDate && d < rangeStartDate) return false;
+        if (rangeEndDate && d > rangeEndDate) return false;
+        return true;
+      });
+    }
+    return records;
+  }, [records, statsDateMode, selectedSingleDate, rangeStartDate, rangeEndDate]);
 
   const filteredRecords = useMemo(() => {
     if (categoryFilter === '全部') return records;
@@ -786,10 +820,10 @@ export default function App() {
       };
     };
 
-    const overall = calcGroupMetrics(records);
+    const overall = calcGroupMetrics(statsRecords);
 
     const byCategory = TRADE_CATEGORIES.map((cat) => {
-      const items = records.filter(
+      const items = statsRecords.filter(
         (r) => inferCategoryFromRecord(r) === cat.value
       );
       return {
@@ -799,7 +833,7 @@ export default function App() {
     });
 
     const modeMap = new Map();
-    records.forEach((r) => {
+    statsRecords.forEach((r) => {
       const key = `${inferCategoryFromRecord(r)}||${r.mode || '未分类'}`;
       if (!modeMap.has(key)) {
         modeMap.set(key, {
@@ -820,7 +854,7 @@ export default function App() {
       .sort((a, b) => b.metrics.count - a.metrics.count);
 
     const ladderStats = LADDER_ONLY_LEVELS.map((level) => {
-      const items = records.filter(
+      const items = statsRecords.filter(
         (r) => normalizeBoardHeight(r.boardHeight) === level
       );
       const m = calcGroupMetrics(items);
@@ -839,10 +873,22 @@ export default function App() {
       bySubMode,
       ladderStats,
     };
-  }, [records]);
+  }, [statsRecords]);
 
   const currentModeOptions =
     MODES_BY_CATEGORY[form.category] || MODES_BY_CATEGORY['打板交易'];
+
+  const dateRangeLabel = useMemo(() => {
+    if (statsDateMode === 'single') {
+      return selectedSingleDate ? `单日：${selectedSingleDate}` : '单日统计';
+    }
+    if (statsDateMode === 'range') {
+      const startText = rangeStartDate || '最早';
+      const endText = rangeEndDate || '最新';
+      return `区间：${startText} ~ ${endText}`;
+    }
+    return '全部日期';
+  }, [statsDateMode, selectedSingleDate, rangeStartDate, rangeEndDate]);
 
   return (
     <div className="min-h-screen bg-[#0B0E17] text-slate-100 pb-24 font-sans">
@@ -858,11 +904,11 @@ export default function App() {
                 BoardMaster
               </h1>
               <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-400 border border-rose-500/30 shrink-0">
-                v2.9
+                v2.10
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5 truncate">
-              总资金 {totalCapital.toLocaleString()} · 共 {stats.overall.count} 笔
+              总资金 {totalCapital.toLocaleString()} · 共 {records.length} 笔
             </p>
           </div>
         </div>
@@ -894,7 +940,7 @@ export default function App() {
             <div className="text-[11px] text-slate-400 truncate mt-0.5">
               {lastBackupTime
                 ? `上次备份：${lastBackupTime}`
-                : '更改任何设置不会删记录，建议定期备份留底'}
+                : '更改任何设置或切换日期不会删记录'}
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
@@ -924,6 +970,101 @@ export default function App() {
 
         {activeTab === 'stats' && (
           <>
+            {/* 统计日期选择器：全部日期 / 指定某一天 / 日期区间 */}
+            <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div>
+                  <h2 className="text-sm font-bold text-white">
+                    选择日期查看统计
+                  </h2>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    当前范围：{dateRangeLabel}（命中 {stats.overall.count} 笔）
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  {[
+                    { id: 'all', label: '全部日期' },
+                    { id: 'single', label: '选某一天' },
+                    { id: 'range', label: '日期区间' },
+                  ].map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setStatsDateMode(m.id)}
+                      className={`px-2.5 py-1 rounded-xl text-xs font-medium border transition ${
+                        statsDateMode === m.id
+                          ? 'bg-rose-600 text-white border-rose-500'
+                          : 'bg-[#0D111C] text-slate-300 border-slate-700 hover:border-slate-500'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {statsDateMode === 'single' && (
+                <div className="space-y-2.5 pt-1">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="date"
+                      value={selectedSingleDate}
+                      onChange={(e) => setSelectedSingleDate(e.target.value)}
+                      className="flex-1 bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2 text-sm text-white"
+                    />
+                    {availableDates.length > 0 && (
+                      <select
+                        value={
+                          availableDates.includes(selectedSingleDate)
+                            ? selectedSingleDate
+                            : ''
+                        }
+                        onChange={(e) => {
+                          if (e.target.value) setSelectedSingleDate(e.target.value);
+                        }}
+                        className="bg-[#0D111C] border border-slate-700 rounded-xl px-2.5 py-2 text-xs text-slate-200"
+                      >
+                        <option value="">已有记录日期</option>
+                        {availableDates.map((d) => (
+                          <option key={d} value={d}>
+                            {d}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {statsDateMode === 'range' && (
+                <div className="grid grid-cols-2 gap-2.5 pt-1">
+                  <div>
+                    <label className="block text-[11px] text-slate-400 mb-1">
+                      开始日期
+                    </label>
+                    <input
+                      type="date"
+                      value={rangeStartDate}
+                      onChange={(e) => setRangeStartDate(e.target.value)}
+                      className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-slate-400 mb-1">
+                      结束日期
+                    </label>
+                    <input
+                      type="date"
+                      value={rangeEndDate}
+                      onChange={(e) => setRangeEndDate(e.target.value)}
+                      className="w-full bg-[#0D111C] border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+                    />
+                  </div>
+                </div>
+              )}
+            </section>
+
             {/* 三大交易类型拆账统计 */}
             <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
@@ -932,11 +1073,11 @@ export default function App() {
                     三大交易类型成功率与盈亏
                   </h2>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    打板交易 vs 高位回调 vs 模式外交易
+                    {dateRangeLabel} · 打板交易 vs 高位回调 vs 模式外交易
                   </p>
                 </div>
                 <span className="text-xs text-slate-400 font-mono">
-                  总胜率 {stats.overall.winRate}%
+                  胜率 {stats.overall.winRate}%
                 </span>
               </div>
 
@@ -1031,7 +1172,7 @@ export default function App() {
                       细分打法与诱因拆解
                     </h2>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      精确对比排板、半路、水下低吸、回调及各类模式外表现
+                      {dateRangeLabel} · 精确对比各打法与模式外表现
                     </p>
                   </div>
                 </div>
@@ -1095,7 +1236,7 @@ export default function App() {
             <section className="bg-[#131826] border border-slate-800/90 rounded-2xl p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-bold text-white">连板高度统计</h2>
-                <span className="text-xs text-slate-400">仅统计连板标</span>
+                <span className="text-xs text-slate-400">{dateRangeLabel}</span>
               </div>
 
               <div className="space-y-2">
